@@ -1,0 +1,113 @@
+# EWU self-hosted Kan deployment (kan.ewu.tools)
+#
+# Mirrors the Crikket setup on DigitalOcean (Frankfurt): Caddy terminates TLS
+# and reverse-proxies to the Kan web container. Postgres is bundled and not
+# exposed to the host. Images are BUILT FROM THIS FORK (EWU-GmbH/kan) so that
+# EWU-specific changes (e.g. the Crikket -> Kan integration) ship with the app.
+#
+# Usage on the droplet:
+#   cp .env.example .env      # then fill in the secrets
+#   docker compose up -d --build
+#
+# This is a self-host deployment: NEXT_PUBLIC_KAN_ENV must stay UNSET
+# (do not set it to "cloud"), which keeps Stripe/billing disabled.
+
+services:
+  caddy:
+    image: caddy:2-alpine
+    container_name: kan-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    environment:
+      - KAN_DOMAIN=${KAN_DOMAIN:-kan.ewu.tools}
+      - ACME_EMAIL=${ACME_EMAIL:-admin@ewu.tools}
+    depends_on:
+      - web
+    networks:
+      - kan-network
+
+  migrate:
+    container_name: kan-migrate
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      target: migrate
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    networks:
+      - kan-network
+
+  web:
+    container_name: kan-web
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      target: web
+      args:
+        APP_VERSION: ${APP_VERSION:-}
+    expose:
+      - "3000"
+    env_file:
+      - .env
+    environment:
+      # Required
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS}
+      # Production standalone server (matches the Dockerfile web target)
+      - NEXT_PUBLIC_USE_STANDALONE_OUTPUT=true
+      # Auth behaviour for a private, invite-only internal instance
+      - NEXT_PUBLIC_ALLOW_CREDENTIALS=${NEXT_PUBLIC_ALLOW_CREDENTIALS:-true}
+      - NEXT_PUBLIC_DISABLE_SIGN_UP=${NEXT_PUBLIC_DISABLE_SIGN_UP:-false}
+      - NEXT_PUBLIC_DISABLE_EMAIL=${NEXT_PUBLIC_DISABLE_EMAIL:-true}
+      # White-label the public boards
+      - NEXT_PUBLIC_WHITE_LABEL_HIDE_POWERED_BY=${NEXT_PUBLIC_WHITE_LABEL_HIDE_POWERED_BY:-true}
+      # Server-side integration key for Crikket -> Kan (see README)
+      - KAN_ADMIN_API_KEY=${KAN_ADMIN_API_KEY}
+      # Rate limiting (optional)
+      - REDIS_URL=${REDIS_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    networks:
+      - kan-network
+
+  postgres:
+    image: postgres:15
+    container_name: kan-db
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-kan_db}
+      - POSTGRES_USER=${POSTGRES_USER:-kan}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - kan_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kan} -d ${POSTGRES_DB:-kan_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+    networks:
+      - kan-network
+
+networks:
+  kan-network:
+
+volumes:
+  kan_postgres_data:
+  caddy_data:
+  caddy_config:
