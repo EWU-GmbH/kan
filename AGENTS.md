@@ -331,3 +331,20 @@ Update all of the following:
 - Provide clear description of changes
 - Include screenshots for UI changes
 - Keep PRs focused on a single feature/fix
+
+## Cursor Cloud specific instructions
+
+The only runnable product is the Next.js app `@kan/web` (frontend + tRPC/REST API + auth in one process) on port 3000. Standard commands live in `package.json` / this file's "Setup Commands"; notes below are the non-obvious caveats.
+
+### Services / startup
+
+- PostgreSQL 16 is installed locally (apt cluster `16/main`), but the service is NOT auto-started on VM boot. Start it before running the app or migrations: `sudo pg_ctlcluster 16 main start`.
+- Dev DB is `kan_db` (user `kan`, password `kan_password`). The root `.env` already points `POSTGRES_URL` there. If `.env` is missing, recreate it with at least: `NEXT_PUBLIC_BASE_URL=http://localhost:3000`, a `BETTER_AUTH_SECRET` (32+ chars), `POSTGRES_URL=postgresql://kan:kan_password@127.0.0.1:5432/kan_db`, `NEXT_PUBLIC_ALLOW_CREDENTIALS=true` (enables email/password login), and `NEXT_PUBLIC_DISABLE_EMAIL=true` (no SMTP configured).
+- Run the app with `pnpm dev:next` (web + its package watchers only). Avoid plain `pnpm dev`: it also starts `apps/docs` (Mintlify), which is unrelated to the product and has no local tsc/node_modules setup.
+- If `POSTGRES_URL` is unset the app silently falls back to an embedded PGlite DB in `apps/web/pgdata` and auto-runs migrations — handy but not the intended dev path; prefer the real Postgres above so `pnpm db:migrate` / `pnpm db:studio` work.
+- After schema changes run `pnpm db:migrate` (Postgres must be running first).
+
+### Known pre-existing failures (not environment issues)
+
+- `pnpm lint` fails repo-wide: `@next/eslint-plugin-next@14` is incompatible with ESLint 9 (`context.getAncestors is not a function`), plus some existing lint errors. Do not "fix" this via env changes.
+- `pnpm typecheck` fails only for `@kan/web` (pre-existing type errors, e.g. duplicate object keys in `NewCardForm.tsx`, missing `*.svg` module declarations) and `@kan/docs` (no local tsc setup). All internal library packages typecheck cleanly.
