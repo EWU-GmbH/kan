@@ -14,7 +14,8 @@
 services:
   migrate:
     build:
-      context: ../..
+      # Coolify runs compose with --project-directory = repo root, so "." is the monorepo.
+      context: .
       dockerfile: apps/web/Dockerfile
       target: migrate
     environment:
@@ -26,7 +27,7 @@ services:
 
   web:
     build:
-      context: ../..
+      context: .
       dockerfile: apps/web/Dockerfile
       target: web
       args:
