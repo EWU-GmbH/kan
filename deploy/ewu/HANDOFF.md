@@ -57,7 +57,17 @@ Fix:
 
 Smoke-Test nach Redeploy: Workspace ohne URL-Feld anlegen muss `200` liefern.
 
-## Seed / IDs (Live) — Stand nach Fix-Deploy
+## Seed / IDs (Live) — aktiv für Crikket
+
+| Entity | `publicId` |
+| --- | --- |
+| Workspace **Businessplan** | `jzlsx66v76m2` |
+| Board **app.businesswisser.de** | `92381e771662` |
+| Liste **Bugs** | `e6a333d69f2c` |
+| Liste **Feature Requests** | `41f75d877d19` |
+| Liste **Done** | `20e57e57d3f9` |
+
+Legacy (EWU / altes Board **Crikket**, nicht mehr Ziel der Integration):
 
 | Entity | `publicId` |
 | --- | --- |
@@ -66,13 +76,9 @@ Smoke-Test nach Redeploy: Workspace ohne URL-Feld anlegen muss `200` liefern.
 | Liste **Bugs** | `bcj9ygu32fj5` |
 | Liste **Feature Requests** | `sru6aee09wjs` |
 
-API-Key (Prefix `kan_`, Droplet `/root/kan-part3-notes.txt`, mode 600):
-verifiziert mit `Authorization: Bearer` und `x-api-key` → `POST /api/v1/cards`
-liefert `200`.
-
-Smoke-Test nach Redeploy (`5e9d8b7`):
-- `POST /api/v1/workspaces {"name":"businessplan"}` → `200`
-- `POST /api/v1/workspaces {"name":"businessplan2","slug":""}` → `200`
+Coolify Crikket (`report.ewu.tools`) zeigt seit 2026-07-27 auf die
+Businessplan-Listen oben. API-Key muss Workspace-Zugang zu **Businessplan**
+haben.
 
 ## Integrations-Contract
 
@@ -81,9 +87,9 @@ Smoke-Test nach Redeploy (`5e9d8b7`):
 - **Body:** `{ title, description, listPublicId, labelPublicIds:[], memberPublicIds:[], position:"end" }`
 - OpenAPI: `https://kan.ewu.tools/api/v1/openapi.json`
 
-**Crikket-Seite (eigenes Repo — von JW erfragen):**
-- Bugs → Liste `bcj9ygu32fj5`
-- Widget-Features → Liste `sru6aee09wjs` (ohne Report)
+**Crikket → Kan (live):**
+- Bugs → Liste `e6a333d69f2c` (Board app.businesswisser.de)
+- Widget-Features → Liste `41f75d877d19` (ohne Report)
 - Secrets: `KAN_BASE_URL`, `KAN_API_KEY`, `KAN_BUGS_LIST_PUBLIC_ID`,
   `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID`
 

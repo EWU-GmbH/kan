@@ -22,10 +22,15 @@ Nur **serverseitig** (nie `NEXT_PUBLIC_*`):
 
 ```bash
 KAN_BASE_URL=https://kan.ewu.tools
-KAN_API_KEY=kan_…          # siehe Droplet /root/kan-part3-notes.txt
-KAN_BUGS_LIST_PUBLIC_ID=bcj9ygu32fj5
-KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=sru6aee09wjs
+KAN_API_KEY=kan_…          # API-Key eines Users mit Zugang zu Workspace Businessplan
+KAN_BUGS_LIST_PUBLIC_ID=e6a333d69f2c              # Board app.businesswisser.de → Bugs
+KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=41f75d877d19  # Board app.businesswisser.de → Feature Requests
 ```
+
+Ziel-Board: Workspace **Businessplan** (`jzlsx66v76m2`) → Board
+**app.businesswisser.de** (`92381e771662`).
+
+Ältere EWU/Crikket-Listen (`bcj9ygu32fj5` / `sru6aee09wjs`) nicht mehr verwenden.
 
 ## Verhalten
 

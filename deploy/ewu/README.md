@@ -119,24 +119,22 @@ Keep the Kan API key in Crikket's server-side secrets only.
 
 ### Part 3 checklist (prepare after Smoke-Test)
 
-Seeded on the Coolify instance during smoke-test (public IDs only):
+Active Crikket target (Businessplan / app.businesswisser.de):
 
 | Entity | `publicId` |
 | --- | --- |
-| Workspace **EWU** | `6cpeij3lcd5x` |
-| Board **Crikket Bugs** | `7ia2a9abkak6` |
-| List **Bugs** | `bcj9ygu32fj5` |
-| List **Feature requests** | `sru6aee09wjs` |
+| Workspace **Businessplan** | `jzlsx66v76m2` |
+| Board **app.businesswisser.de** | `92381e771662` |
+| List **Bugs** | `e6a333d69f2c` |
+| List **Feature requests** | `41f75d877d19` |
 
-1. Mint a Better Auth API key for a user with `card:create`
-   (`POST /api/auth/api-key/create` works for a normal session on this build;
-   keep the key server-side only). Verified: `Authorization: Bearer` and
-   `x-api-key` both return `200` on `POST /api/v1/cards`.
+1. Mint a Better Auth API key for a user with access to **Businessplan** and
+   `card:create` (keep the key server-side only).
 2. Store in **Crikket** server secrets only:
    - `KAN_BASE_URL=https://kan.ewu.tools`
    - `KAN_API_KEY=<bearer/x-api-key>`
-   - `KAN_BUGS_LIST_PUBLIC_ID=bcj9ygu32fj5`
-   - `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=sru6aee09wjs`
+   - `KAN_BUGS_LIST_PUBLIC_ID=e6a333d69f2c`
+   - `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=41f75d877d19`
 3. Implement Crikket server handlers that `POST /api/v1/cards` with
    `Authorization: Bearer` or `x-api-key` (never from the widget).
 4. Ops note with the live API key is on the droplet at
