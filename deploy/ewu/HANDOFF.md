@@ -57,18 +57,22 @@ Fix:
 
 Smoke-Test nach Redeploy: Workspace ohne URL-Feld anlegen muss `200` liefern.
 
-## Seed / IDs (Live)
+## Seed / IDs (Live) — Stand nach Fix-Deploy
 
 | Entity | `publicId` |
 | --- | --- |
 | Workspace **EWU** | `6cpeij3lcd5x` |
-| Board **Crikket** (ggf. umbenannt von „Crikket Bugs") | `7ia2a9abkak6` |
+| Board **Crikket** | `7ia2a9abkak6` |
 | Liste **Bugs** | `bcj9ygu32fj5` |
 | Liste **Feature Requests** | `sru6aee09wjs` |
 
-API-Key (serverseitig, Droplet `/root/kan-part3-notes.txt`, mode 600):
-`KAN_API_KEY` für User `ewu-admin-…@ewu.tools`. Zusätzlich Ziel: Key mit
-Prefix `kan_` via UI/Settings erzeugen.
+API-Key (Prefix `kan_`, Droplet `/root/kan-part3-notes.txt`, mode 600):
+verifiziert mit `Authorization: Bearer` und `x-api-key` → `POST /api/v1/cards`
+liefert `200`.
+
+Smoke-Test nach Redeploy (`5e9d8b7`):
+- `POST /api/v1/workspaces {"name":"businessplan"}` → `200`
+- `POST /api/v1/workspaces {"name":"businessplan2","slug":""}` → `200`
 
 ## Integrations-Contract
 
@@ -85,7 +89,6 @@ Prefix `kan_` via UI/Settings erzeugen.
 
 ## Nächste Schritte
 
-1. Fix deployen + Smoke-Test Workspace-Create ohne Slug.
-2. Board/Listen-Namen auf „Crikket" / „Bugs" / „Feature Requests" angleichen;
-   `kan_`-API-Key erzeugen; IDs ausgeben.
-3. Crikket-Repo bei JW erfragen und Teil 3 dort umsetzen.
+1. ~~Fix deployen + Smoke-Test~~ erledigt.
+2. ~~Board/Listen + `kan_`-API-Key~~ erledigt.
+3. **Offen:** Crikket-Repo-Name/Org von JW erfragen und Teil 3 dort umsetzen.
