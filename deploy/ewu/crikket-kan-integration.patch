@@ -1,0 +1,892 @@
+From 7ae3bbbf8382d0f8f4b5a43507695d893ad8cf21 Mon Sep 17 00:00:00 2001
+From: Cursor Agent <cursoragent@cursor.com>
+Date: Mon, 27 Jul 2026 10:17:12 +0000
+Subject: [PATCH] feat(kan): sync bugs to Kan and send widget features without
+ reports
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- Add @crikket/kan client (server-side KAN_* secrets only)
+- After bug-report finalize, create a card on the Bugs list
+- New POST /api/embed/feature-requests → Feature Requests list (no Crikket report)
+- Capture widget: Feature Request chooser + form flow
+---
+ apps/server/.env.example                      |  10 ++
+ apps/server/package.json                      |   1 +
+ .../src/capture/feature-request-route.ts      | 105 ++++++++++++++++++
+ apps/server/src/index.ts                      |   9 +-
+ packages/bug-reports/package.json             |   1 +
+ .../bug-reports/src/lib/upload-session.ts     |  50 +++++++++
+ packages/env/src/server.ts                    |   5 +
+ packages/kan/package.json                     |  23 ++++
+ packages/kan/src/client.ts                    |  86 ++++++++++++++
+ packages/kan/test/client.test.ts              |  10 ++
+ packages/kan/tsconfig.json                    |   6 +
+ sdks/capture/src/runtime/capture-runtime.ts   |  10 ++
+ .../transport/feature-request-transport.ts    |  46 ++++++++
+ .../ui/capture-widget/capture-widget-view.tsx |  19 ++++
+ .../hooks/use-capture-ui-handlers.ts          |  47 ++++++++
+ .../sections/chooser-section.tsx              |  10 ++
+ .../sections/feature-request-form-section.tsx |  68 ++++++++++++
+ .../sections/success-section.tsx              |  22 ++++
+ .../utils/get-view-description.ts             |   4 +
+ sdks/capture/src/ui/store/capture-ui-store.ts |  18 +++
+ sdks/capture/src/ui/types.ts                  |  15 ++-
+ 21 files changed, 563 insertions(+), 2 deletions(-)
+ create mode 100644 apps/server/src/capture/feature-request-route.ts
+ create mode 100644 packages/kan/package.json
+ create mode 100644 packages/kan/src/client.ts
+ create mode 100644 packages/kan/test/client.test.ts
+ create mode 100644 packages/kan/tsconfig.json
+ create mode 100644 sdks/capture/src/transport/feature-request-transport.ts
+ create mode 100644 sdks/capture/src/ui/capture-widget/sections/feature-request-form-section.tsx
+
+diff --git a/apps/server/.env.example b/apps/server/.env.example
+index 2360f2b..000e895 100644
+--- a/apps/server/.env.example
++++ b/apps/server/.env.example
+@@ -84,3 +84,13 @@ STORAGE_PUBLIC_URL=
+ CAPTURE_SUBMIT_TOKEN_SECRET=
+ TURNSTILE_SITE_KEY=
+ TURNSTILE_SECRET_KEY=
++
++# ==========================================
++# KAN INTEGRATION (EWU self-host) - Optional
++# ==========================================
++# Server-side only. Never set these as NEXT_PUBLIC_* or ship them to the widget.
++# When unset, Kan sync is disabled (no-op).
++KAN_BASE_URL=https://kan.ewu.tools
++KAN_API_KEY=
++KAN_BUGS_LIST_PUBLIC_ID=bcj9ygu32fj5
++KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=sru6aee09wjs
+diff --git a/apps/server/package.json b/apps/server/package.json
+index b5a8107..7a984db 100644
+--- a/apps/server/package.json
++++ b/apps/server/package.json
+@@ -17,6 +17,7 @@
+     "@crikket/bug-reports": "workspace:*",
+     "@crikket/db": "workspace:*",
+     "@crikket/env": "workspace:*",
++    "@crikket/kan": "workspace:*",
+     "@orpc/openapi": "catalog:",
+     "@orpc/server": "catalog:",
+     "@orpc/zod": "catalog:",
+diff --git a/apps/server/src/capture/feature-request-route.ts b/apps/server/src/capture/feature-request-route.ts
+new file mode 100644
+index 0000000..a460d0a
+--- /dev/null
++++ b/apps/server/src/capture/feature-request-route.ts
+@@ -0,0 +1,105 @@
++import {
++  createKanCard,
++  getKanFeatureRequestsListPublicId,
++} from "@crikket/kan/client"
++import { ORPCError } from "@orpc/server"
++import { z } from "zod"
++import {
++  authorizeCaptureSubmitRequest,
++  buildJsonResponse,
++  toCaptureErrorResponse,
++} from "./shared"
++
++const featureRequestInputSchema = z.object({
++  title: z.string().trim().min(1).max(200),
++  description: z.string().trim().max(4000).optional().default(""),
++  pageUrl: z.string().trim().max(2000).optional(),
++  pageTitle: z.string().trim().max(500).optional(),
++})
++
++/**
++ * Widget feature wishes → Kan "Feature Requests" directly.
++ * Does NOT create a Crikket bug report.
++ */
++export async function handleFeatureRequest(input: {
++  request: Request
++}): Promise<Response> {
++  const route = "/api/embed/feature-requests"
++  let keyId: string | null = null
++  let origin: string | null = null
++
++  try {
++    const authorization = await authorizeCaptureSubmitRequest({
++      request: input.request,
++      route,
++    })
++    if (authorization instanceof Response) {
++      return authorization
++    }
++
++    keyId = authorization.keyId
++    origin = authorization.origin
++
++    const body = featureRequestInputSchema.parse(
++      (await input.request.json()) as unknown
++    )
++
++    const listPublicId = getKanFeatureRequestsListPublicId()
++    if (!listPublicId) {
++      throw new ORPCError("BAD_REQUEST", {
++        message: "Kan feature-request integration is not configured.",
++      })
++    }
++
++    const descriptionParts = [
++      body.description,
++      body.pageUrl ? `Page: ${body.pageUrl}` : "",
++      body.pageTitle ? `Page title: ${body.pageTitle}` : "",
++      `Origin: ${authorization.origin}`,
++      "Source: Crikket widget feature request (no Crikket report).",
++    ].filter((line) => line.length > 0)
++
++    const card = await createKanCard({
++      title: body.title,
++      description: descriptionParts.join("\n\n"),
++      listPublicId,
++    })
++
++    if (!card) {
++      throw new ORPCError("INTERNAL_SERVER_ERROR", {
++        message: "Unable to create Kan card for feature request.",
++      })
++    }
++
++    return buildJsonResponse(
++      {
++        cardPublicId: card.publicId,
++        ok: true,
++      },
++      {
++        headers: authorization.rateLimitHeaders,
++      }
++    )
++  } catch (error) {
++    if (error instanceof SyntaxError) {
++      return toCaptureErrorResponse(
++        new ORPCError("BAD_REQUEST", {
++          message: "Invalid JSON in feature request.",
++        }),
++        {
++          keyId,
++          method: input.request.method,
++          origin,
++          route,
++        }
++      )
++    }
++
++    return toCaptureErrorResponse(error, {
++      keyId,
++      method: input.request.method,
++      origin,
++      route,
++    })
++  }
++}
+diff --git a/apps/server/src/index.ts b/apps/server/src/index.ts
+index 2fe2069..0f12412 100644
+--- a/apps/server/src/index.ts
++++ b/apps/server/src/index.ts
+@@ -18,6 +18,7 @@ import { Hono } from "hono"
+ import { cors } from "hono/cors"
+ import { logger } from "hono/logger"
+ import { handleCaptureFinalize } from "./capture/finalize-route"
++import { handleFeatureRequest } from "./capture/feature-request-route"
+ import { handleCaptureToken } from "./capture/token-route"
+ import { handleCaptureUploadSession } from "./capture/upload-session-route"
+ 
+@@ -105,7 +106,8 @@ app.use(
+       if (
+         (c.req.path === "/api/embed/capture-token" ||
+           c.req.path === "/api/embed/bug-report-upload-session" ||
+-          c.req.path === "/api/embed/bug-report-finalize") &&
++          c.req.path === "/api/embed/bug-report-finalize" ||
++          c.req.path === "/api/embed/feature-requests") &&
+         origin.trim().length > 0
+       ) {
+         return origin
+@@ -143,6 +145,11 @@ app.post("/api/embed/bug-report-finalize", (c) => {
+     shareOrigin: captureShareOrigin,
+   })
+ })
++app.post("/api/embed/feature-requests", (c) => {
++  return handleFeatureRequest({
++    request: c.req.raw,
++  })
++})
+ 
+ const cleanupInterval = setInterval(() => {
+   runArtifactCleanupPass({ limit: 50 }).catch((error: unknown) => {
+diff --git a/packages/bug-reports/package.json b/packages/bug-reports/package.json
+index 5b80e59..12affd1 100644
+--- a/packages/bug-reports/package.json
++++ b/packages/bug-reports/package.json
+@@ -19,6 +19,7 @@
+     "@crikket/billing": "workspace:*",
+     "@crikket/db": "workspace:*",
+     "@crikket/env": "workspace:*",
++    "@crikket/kan": "workspace:*",
+     "@crikket/shared": "workspace:*",
+     "@orpc/server": "catalog:",
+     "@orpc/zod": "catalog:",
+diff --git a/packages/bug-reports/src/lib/upload-session.ts b/packages/bug-reports/src/lib/upload-session.ts
+index cc2abf0..b5d6c6d 100644
+--- a/packages/bug-reports/src/lib/upload-session.ts
++++ b/packages/bug-reports/src/lib/upload-session.ts
+@@ -396,6 +396,16 @@ export async function finalizeBugReportUpload(input: {
+     })
+   }
+ 
++  // Sync to EWU Kan "Bugs" list (server-side; never blocks report creation).
++  void syncBugReportToKan({
++    id: uploadSession.id,
++    title: uploadSession.title,
++    description: uploadSession.description,
++    url: uploadSession.url,
++    priority: uploadSession.priority,
++    sharePath: `/s/${uploadSession.id}`,
++  })
++
+   return {
+     id: uploadSession.id,
+     shareUrl: `/s/${uploadSession.id}`,
+@@ -404,6 +414,46 @@ export async function finalizeBugReportUpload(input: {
+   }
+ }
+ 
++async function syncBugReportToKan(input: {
++  id: string
++  title: string
++  description: string | null
++  url: string | null
++  priority: string | null
++  sharePath: string
++}): Promise<void> {
++  try {
++    const { createKanCardInBackground, getKanBugsListPublicId } = await import(
++      "@crikket/kan/client"
++    )
++    const listPublicId = getKanBugsListPublicId()
++    if (!listPublicId) {
++      return
++    }
++
++    const details = [
++      input.description?.trim() || "",
++      input.url ? `Page: ${input.url}` : "",
++      input.priority ? `Priority: ${input.priority}` : "",
++      `Crikket report: ${input.sharePath}`,
++      `Report ID: ${input.id}`,
++    ]
++      .filter((line) => line.length > 0)
++      .join("\n\n")
++
++    createKanCardInBackground(
++      {
++        title: input.title || `Crikket bug ${input.id}`,
++        description: details,
++        listPublicId,
++      },
++      `bug-report ${input.id}`
++    )
++  } catch (error) {
++    console.error("[kan] failed to queue bug-report sync", error)
++  }
++}
++
+ async function finalizeBugReportDebuggerIngestion(input: {
+   bugReportId: string
+   organizationId: string
+diff --git a/packages/env/src/server.ts b/packages/env/src/server.ts
+index a66676b..8f4dd3f 100644
+--- a/packages/env/src/server.ts
++++ b/packages/env/src/server.ts
+@@ -54,6 +54,11 @@ export const env = createEnv({
+     CAPTURE_SUBMIT_TOKEN_SECRET: z.string().min(32).optional(),
+     TURNSTILE_SITE_KEY: z.string().min(1).optional(),
+     TURNSTILE_SECRET_KEY: z.string().min(1).optional(),
++    // EWU Kan integration (server-side only — never expose to the widget)
++    KAN_BASE_URL: z.url().optional(),
++    KAN_API_KEY: z.string().min(1).optional(),
++    KAN_BUGS_LIST_PUBLIC_ID: z.string().min(12).max(12).optional(),
++    KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID: z.string().min(12).max(12).optional(),
+     NODE_ENV: z
+       .enum(["development", "production", "staging"])
+       .default("development"),
+diff --git a/packages/kan/package.json b/packages/kan/package.json
+new file mode 100644
+index 0000000..1db8784
+--- /dev/null
++++ b/packages/kan/package.json
+@@ -0,0 +1,23 @@
++{
++  "name": "@crikket/kan",
++  "version": "0.0.0",
++  "private": true,
++  "type": "module",
++  "exports": {
++    "./*": {
++      "default": "./src/*.ts"
++    }
++  },
++  "scripts": {
++    "check-types": "tsc --noEmit -p tsconfig.json",
++    "test": "bun test test"
++  },
++  "dependencies": {
++    "@crikket/env": "workspace:*"
++  },
++  "devDependencies": {
++    "@crikket/config": "workspace:*",
++    "@types/bun": "catalog:",
++    "typescript": "catalog:"
++  }
++}
+diff --git a/packages/kan/src/client.ts b/packages/kan/src/client.ts
+new file mode 100644
+index 0000000..5059d17
+--- /dev/null
++++ b/packages/kan/src/client.ts
+@@ -0,0 +1,86 @@
++import { env } from "@crikket/env/server"
++
++export interface CreateKanCardInput {
++  title: string
++  description?: string
++  listPublicId: string
++}
++
++export interface CreateKanCardResult {
++  publicId: string
++}
++
++export function isKanIntegrationEnabled(): boolean {
++  return Boolean(
++    env.KAN_API_KEY?.trim() &&
++      env.KAN_BASE_URL?.trim() &&
++      (env.KAN_BUGS_LIST_PUBLIC_ID?.trim() ||
++        env.KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID?.trim())
++  )
++}
++
++export function getKanBugsListPublicId(): string | null {
++  return env.KAN_BUGS_LIST_PUBLIC_ID?.trim() || null
++}
++
++export function getKanFeatureRequestsListPublicId(): string | null {
++  return env.KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID?.trim() || null
++}
++
++/**
++ * Create a card on the EWU Kan board.
++ * Uses server-side KAN_API_KEY only — never call from the browser/widget.
++ */
++export async function createKanCard(
++  input: CreateKanCardInput
++): Promise<CreateKanCardResult | null> {
++  const apiKey = env.KAN_API_KEY?.trim()
++  const baseUrl = env.KAN_BASE_URL?.trim()?.replace(/\/+$/, "")
++
++  if (!apiKey || !baseUrl || !input.listPublicId.trim()) {
++    return null
++  }
++
++  const title = input.title.trim().slice(0, 200) || "Untitled"
++  const description = (input.description ?? "").trim().slice(0, 8000)
++
++  const response = await fetch(`${baseUrl}/api/v1/cards`, {
++    method: "POST",
++    headers: {
++      Authorization: `Bearer ${apiKey}`,
++      "Content-Type": "application/json",
++    },
++    body: JSON.stringify({
++      title,
++      description,
++      listPublicId: input.listPublicId,
++      labelPublicIds: [],
++      memberPublicIds: [],
++      position: "end",
++    }),
++  })
++
++  if (!response.ok) {
++    const body = await response.text().catch(() => "")
++    throw new Error(
++      `Kan card create failed (${response.status}): ${body.slice(0, 500)}`
++    )
++  }
++
++  const data = (await response.json()) as { publicId?: string }
++  if (!data.publicId) {
++    throw new Error("Kan card create returned no publicId")
++  }
++
++  return { publicId: data.publicId }
++}
++
++/** Fire-and-forget wrapper so Kan outages never block Crikket flows. */
++export function createKanCardInBackground(
++  input: CreateKanCardInput,
++  context: string
++): void {
++  void createKanCard(input).catch((error: unknown) => {
++    console.error(`[kan] ${context} failed`, error)
++  })
++}
+diff --git a/packages/kan/test/client.test.ts b/packages/kan/test/client.test.ts
+new file mode 100644
+index 0000000..f221c9d
+--- /dev/null
++++ b/packages/kan/test/client.test.ts
+@@ -0,0 +1,10 @@
++import { describe, expect, test } from "bun:test"
++
++describe("kan client module", () => {
++  test("exports createKanCard helpers", async () => {
++    const mod = await import("../src/client")
++    expect(typeof mod.createKanCard).toBe("function")
++    expect(typeof mod.createKanCardInBackground).toBe("function")
++    expect(typeof mod.isKanIntegrationEnabled).toBe("function")
++  })
++})
+diff --git a/packages/kan/tsconfig.json b/packages/kan/tsconfig.json
+new file mode 100644
+index 0000000..0e021d1
+--- /dev/null
++++ b/packages/kan/tsconfig.json
+@@ -0,0 +1,6 @@
++{
++  "extends": "@crikket/config/tsconfig.base.json",
++  "compilerOptions": {
++    "strictNullChecks": true
++  }
++}
+diff --git a/sdks/capture/src/runtime/capture-runtime.ts b/sdks/capture/src/runtime/capture-runtime.ts
+index 288517d..c00e343 100644
+--- a/sdks/capture/src/runtime/capture-runtime.ts
++++ b/sdks/capture/src/runtime/capture-runtime.ts
+@@ -89,6 +89,16 @@ export class CaptureSdkRuntime implements CaptureRuntimeController {
+       onSubmit: (draft, options) => {
+         return this.submit(draft, options).then(() => undefined)
+       },
++      onSubmitFeatureRequest: async (draft) => {
++        const config = this.getRuntimeConfig()
++        const { submitFeatureRequest } = await import(
++          "../transport/feature-request-transport"
++        )
++        return submitFeatureRequest({
++          config,
++          draft,
++        })
++      },
+       onReset: () => {
+         this.reset()
+       },
+diff --git a/sdks/capture/src/transport/feature-request-transport.ts b/sdks/capture/src/transport/feature-request-transport.ts
+new file mode 100644
+index 0000000..5e1fd78
+--- /dev/null
++++ b/sdks/capture/src/transport/feature-request-transport.ts
+@@ -0,0 +1,46 @@
++import type { CaptureRuntimeConfig } from "../types"
++import { TRAILING_SLASHES_REGEX } from "../constants"
++
++export async function submitFeatureRequest(input: {
++  config: CaptureRuntimeConfig
++  draft: {
++    title: string
++    description: string
++  }
++}): Promise<{ cardPublicId?: string }> {
++  const host = input.config.host.replace(TRAILING_SLASHES_REGEX, "")
++  const response = await fetch(`${host}/api/embed/feature-requests`, {
++    method: "POST",
++    headers: {
++      "content-type": "application/json",
++      "x-crikket-public-key": input.config.key,
++    },
++    body: JSON.stringify({
++      title: input.draft.title,
++      description: input.draft.description,
++      pageUrl:
++        typeof window !== "undefined" ? window.location.href.slice(0, 2000) : "",
++      pageTitle:
++        typeof document !== "undefined" ? document.title.slice(0, 500) : "",
++    }),
++    credentials: "omit",
++    mode: "cors",
++  })
++
++  const payload = (await response.json().catch(() => null)) as {
++    cardPublicId?: string
++    message?: string
++    code?: string
++  } | null
++
++  if (!response.ok) {
++    throw new Error(
++      payload?.message ||
++        `Feature request failed with status ${response.status}.`
++    )
++  }
++
++  return {
++    cardPublicId: payload?.cardPublicId,
++  }
++}
+diff --git a/sdks/capture/src/ui/capture-widget/capture-widget-view.tsx b/sdks/capture/src/ui/capture-widget/capture-widget-view.tsx
+index 3b86816..55cf8c8 100644
+--- a/sdks/capture/src/ui/capture-widget/capture-widget-view.tsx
++++ b/sdks/capture/src/ui/capture-widget/capture-widget-view.tsx
+@@ -1,6 +1,7 @@
+ import { lazy, Suspense } from "react"
+ import type { CaptureUiHandlers, CaptureUiState } from "../types"
+ import { ChooserSection } from "./sections/chooser-section"
++import { FeatureRequestFormSection } from "./sections/feature-request-form-section"
+ import { SuccessSection } from "./sections/success-section"
+ 
+ const LazyReviewFormSection = lazy(async () => {
+@@ -21,12 +22,30 @@ export function CaptureWidgetView(props: {
+     return (
+       <ChooserSection
+         busy={props.isBusy}
++        onOpenFeatureRequest={props.handlers.onOpenFeatureRequest}
+         onStartVideo={props.handlers.onStartVideo}
+         onTakeScreenshot={props.handlers.onTakeScreenshot}
+       />
+     )
+   }
+ 
++  if (props.state.view === "feature-request") {
++    return (
++      <FeatureRequestFormSection
++        busy={props.isSubmitPending || props.isBusy}
++        description={props.state.featureRequestDraft.description}
++        errorMessage={props.state.errorMessage}
++        onBack={props.handlers.onCancel}
++        onDescriptionChange={props.handlers.onFeatureRequestDescriptionChange}
++        onSubmit={() => {
++          void props.handlers.onSubmitFeatureRequest()
++        }}
++        onTitleChange={props.handlers.onFeatureRequestTitleChange}
++        title={props.state.featureRequestDraft.title}
++      />
++    )
++  }
++
+   if (props.state.view === "review") {
+     return (
+       <Suspense fallback={<ReviewSectionFallback />}>
+diff --git a/sdks/capture/src/ui/capture-widget/hooks/use-capture-ui-handlers.ts b/sdks/capture/src/ui/capture-widget/hooks/use-capture-ui-handlers.ts
+index c36f135..e6459f2 100644
+--- a/sdks/capture/src/ui/capture-widget/hooks/use-capture-ui-handlers.ts
++++ b/sdks/capture/src/ui/capture-widget/hooks/use-capture-ui-handlers.ts
+@@ -87,6 +87,29 @@ export function useCaptureUiHandlers(
+           }
+         })
+       },
++      onOpenFeatureRequest: () => {
++        input.store.openFeatureRequest()
++      },
++      onFeatureRequestTitleChange: (value) => {
++        const current = input.store.getSnapshot().featureRequestDraft
++        input.store.patchState({
++          featureRequestDraft: {
++            ...current,
++            title: value.slice(0, 200),
++          },
++          errorMessage: null,
++        })
++      },
++      onFeatureRequestDescriptionChange: (value) => {
++        const current = input.store.getSnapshot().featureRequestDraft
++        input.store.patchState({
++          featureRequestDraft: {
++            ...current,
++            description: value.slice(0, 4000),
++          },
++          errorMessage: null,
++        })
++      },
+       onStopRecording: () => {
+         startBusyTask(async () => {
+           try {
+@@ -112,6 +135,30 @@ export function useCaptureUiHandlers(
+             setIsSubmitPending(false)
+           })
+       },
++      onSubmitFeatureRequest: () => {
++        const draft = input.store.getSnapshot().featureRequestDraft
++        if (!draft.title.trim()) {
++          input.store.showError("Title is required.")
++          return Promise.resolve()
++        }
++
++        setIsSubmitPending(true)
++        input.store.patchState({
++          errorMessage: null,
++        })
++
++        return input.callbacks
++          .onSubmitFeatureRequest(draft)
++          .then(() => {
++            input.store.showSuccess("")
++          })
++          .catch((error) => {
++            input.store.showError(toUserError(error))
++          })
++          .finally(() => {
++            setIsSubmitPending(false)
++          })
++      },
+       onCancel: () => {
+         input.callbacks.onReset()
+         input.store.openChooser()
+diff --git a/sdks/capture/src/ui/capture-widget/sections/chooser-section.tsx b/sdks/capture/src/ui/capture-widget/sections/chooser-section.tsx
+index 0077746..14d9104 100644
+--- a/sdks/capture/src/ui/capture-widget/sections/chooser-section.tsx
++++ b/sdks/capture/src/ui/capture-widget/sections/chooser-section.tsx
+@@ -2,6 +2,7 @@ import { Button } from "../components/primitives/button"
+ 
+ export function ChooserSection(props: {
+   busy: boolean
++  onOpenFeatureRequest: () => void
+   onStartVideo: () => void
+   onTakeScreenshot: () => void
+ }): React.JSX.Element {
+@@ -29,6 +30,15 @@ export function ChooserSection(props: {
+           Take Screenshot
+         </Button>
+       </div>
++      <Button
++        className="w-full"
++        disabled={props.busy}
++        onClick={props.onOpenFeatureRequest}
++        type="button"
++        variant="outline"
++      >
++        Feature Request
++      </Button>
+     </section>
+   )
+ }
+diff --git a/sdks/capture/src/ui/capture-widget/sections/feature-request-form-section.tsx b/sdks/capture/src/ui/capture-widget/sections/feature-request-form-section.tsx
+new file mode 100644
+index 0000000..fb2c20b
+--- /dev/null
++++ b/sdks/capture/src/ui/capture-widget/sections/feature-request-form-section.tsx
+@@ -0,0 +1,68 @@
++import { Button } from "../components/primitives/button"
++import { Field } from "../components/primitives/field"
++import { Input } from "../components/primitives/input"
++import { Label } from "../components/primitives/label"
++import { Textarea } from "../components/primitives/textarea"
++
++export function FeatureRequestFormSection(props: {
++  busy: boolean
++  description: string
++  errorMessage: string | null
++  onBack: () => void
++  onDescriptionChange: (value: string) => void
++  onSubmit: () => void
++  onTitleChange: (value: string) => void
++  title: string
++}): React.JSX.Element {
++  return (
++    <section className="grid gap-4 p-5">
++      <p className="m-0 text-muted-foreground text-sm">
++        Suggest a feature. This is sent directly to the team board — no bug
++        report is created.
++      </p>
++      <Field>
++        <Label htmlFor="crikket-feature-title">Title</Label>
++        <Input
++          disabled={props.busy}
++          id="crikket-feature-title"
++          maxLength={200}
++          onChange={(event) => props.onTitleChange(event.target.value)}
++          placeholder="What should we add?"
++          value={props.title}
++        />
++      </Field>
++      <Field>
++        <Label htmlFor="crikket-feature-description">Details</Label>
++        <Textarea
++          disabled={props.busy}
++          id="crikket-feature-description"
++          maxLength={4000}
++          onChange={(event) => props.onDescriptionChange(event.target.value)}
++          placeholder="Optional context…"
++          rows={4}
++          value={props.description}
++        />
++      </Field>
++      {props.errorMessage ? (
++        <p className="m-0 text-destructive text-sm">{props.errorMessage}</p>
++      ) : null}
++      <div className="grid grid-cols-2 gap-2">
++        <Button
++          disabled={props.busy}
++          onClick={props.onBack}
++          type="button"
++          variant="outline"
++        >
++          Back
++        </Button>
++        <Button
++          disabled={props.busy || props.title.trim().length === 0}
++          onClick={props.onSubmit}
++          type="button"
++        >
++          {props.busy ? "Sending…" : "Send to board"}
++        </Button>
++      </div>
++    </section>
++  )
++}
+diff --git a/sdks/capture/src/ui/capture-widget/sections/success-section.tsx b/sdks/capture/src/ui/capture-widget/sections/success-section.tsx
+index f34ea3b..f58797e 100644
+--- a/sdks/capture/src/ui/capture-widget/sections/success-section.tsx
++++ b/sdks/capture/src/ui/capture-widget/sections/success-section.tsx
+@@ -9,6 +9,28 @@ export function SuccessSection(props: {
+   handlers: CaptureUiHandlers
+ }): React.JSX.Element {
+   const hasCopied = props.state.copyLabel === "Copied"
++  const isFeatureRequest = props.state.shareUrl.trim().length === 0
++
++  if (isFeatureRequest) {
++    return (
++      <section className="grid gap-5 p-5">
++        <div className="grid gap-1 text-center">
++          <strong className="text-green-700 text-xl">Feature request sent</strong>
++          <p className="m-0 text-muted-foreground text-sm">
++            Thanks — your idea was sent to the team board.
++          </p>
++        </div>
++        <Button
++          className="w-full"
++          disabled={props.state.busy}
++          onClick={props.handlers.onRetry}
++          type="button"
++        >
++          Done
++        </Button>
++      </section>
++    )
++  }
+ 
+   return (
+     <section className="grid gap-5 p-5">
+diff --git a/sdks/capture/src/ui/capture-widget/utils/get-view-description.ts b/sdks/capture/src/ui/capture-widget/utils/get-view-description.ts
+index 95f222c..1ef58cd 100644
+--- a/sdks/capture/src/ui/capture-widget/utils/get-view-description.ts
++++ b/sdks/capture/src/ui/capture-widget/utils/get-view-description.ts
+@@ -5,6 +5,10 @@ export function getViewDescription(view: CaptureUiState["view"]): string {
+     return "Choose how to capture"
+   }
+ 
++  if (view === "feature-request") {
++    return "Suggest a feature"
++  }
++
+   if (view === "review") {
+     return "Review and submit"
+   }
+diff --git a/sdks/capture/src/ui/store/capture-ui-store.ts b/sdks/capture/src/ui/store/capture-ui-store.ts
+index 647d9e6..20e52a9 100644
+--- a/sdks/capture/src/ui/store/capture-ui-store.ts
++++ b/sdks/capture/src/ui/store/capture-ui-store.ts
+@@ -78,6 +78,20 @@ export function createCaptureUiStore(): CaptureUiStore {
+         busy: false,
+       })
+     },
++    openFeatureRequest: () => {
++      patchState({
++        overlayOpen: true,
++        recordingDockOpen: false,
++        recordingStartedAt: null,
++        view: "feature-request",
++        errorMessage: null,
++        busy: false,
++        featureRequestDraft: {
++          title: "",
++          description: "",
++        },
++      })
++    },
+     close: () => {
+       patchState({
+         overlayOpen: false,
+@@ -154,5 +168,9 @@ function createInitialState(): CaptureUiState {
+       visibility: BUG_REPORT_VISIBILITY_OPTIONS.private,
+     },
+     reviewFormKey: "",
++    featureRequestDraft: {
++      title: "",
++      description: "",
++    },
+   }
+ }
+diff --git a/sdks/capture/src/ui/types.ts b/sdks/capture/src/ui/types.ts
+index d2c1f23..0b25c81 100644
+--- a/sdks/capture/src/ui/types.ts
++++ b/sdks/capture/src/ui/types.ts
+@@ -9,7 +9,7 @@ export interface CaptureReviewSubmitOptions {
+ }
+ 
+ export interface CaptureUiState {
+-  view: "chooser" | "recording" | "review" | "success"
++  view: "chooser" | "recording" | "review" | "feature-request" | "success"
+   overlayOpen: boolean
+   recordingDockOpen: boolean
+   busy: boolean
+@@ -22,6 +22,10 @@ export interface CaptureUiState {
+   copyLabel: string
+   reviewDraft: CaptureSubmissionDraft
+   reviewFormKey: string
++  featureRequestDraft: {
++    title: string
++    description: string
++  }
+ }
+ 
+ export interface CaptureUiHandlers {
+@@ -29,11 +33,15 @@ export interface CaptureUiHandlers {
+   onClose: () => void
+   onStartVideo: () => void
+   onTakeScreenshot: () => void
++  onOpenFeatureRequest: () => void
++  onFeatureRequestTitleChange: (value: string) => void
++  onFeatureRequestDescriptionChange: (value: string) => void
+   onStopRecording: () => void
+   onSubmit: (
+     draft: CaptureSubmissionDraft,
+     options?: CaptureReviewSubmitOptions
+   ) => Promise<void>
++  onSubmitFeatureRequest: () => Promise<void>
+   onCancel: () => void
+   onRetry: () => void
+   onCopyLink: () => void
+@@ -49,6 +57,10 @@ export interface CaptureUiCallbacks {
+     draft: CaptureSubmissionDraft,
+     options?: CaptureReviewSubmitOptions
+   ) => Promise<void>
++  onSubmitFeatureRequest: (draft: {
++    title: string
++    description: string
++  }) => Promise<{ cardPublicId?: string }>
+   onReset: () => void
+ }
+ 
+@@ -57,6 +69,7 @@ export interface CaptureUiStore {
+   subscribe: (listener: () => void) => () => void
+   patchState: (patch: Partial<CaptureUiState>) => void
+   openChooser: () => void
++  openFeatureRequest: () => void
+   close: () => void
+   showRecording: (startedAt: number) => void
+   showReview: (input: {
+-- 
+2.43.0
+
