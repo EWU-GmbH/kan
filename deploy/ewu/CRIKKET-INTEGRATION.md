@@ -45,6 +45,15 @@ Ziel-Board: Workspace **Businessplan** (`jzlsx66v76m2`) → Board
 - **Beschreibung:** Text + Seite + Priority + absoluter Link
   `https://report.ewu.tools/s/<reportId>`
 
+### Ops-Hinweis (Coolify)
+
+`web` nutzt `network_mode: service:server`. **Nie nur den Server-Container
+neu starten** — sonst verliert `web` das Netzwerk, `report.ewu.tools` liefert
+502 und das Embed-Widget verschwindet. Immer `server` + `web` (+ `caddy`)
+gemeinsam recreaten, oder den ganzen Crikket-Service in Coolify stoppen/starten.
+
+Lokales Image: `ewu-crikket-server:kan-integration` (`pull_policy: never`).
+
 ## Bitte an JW
 
 Schreibzugriff für den Cursor-Bot (oder manuelles Mergen des Patches) auf
