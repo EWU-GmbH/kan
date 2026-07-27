@@ -271,19 +271,37 @@ index cc2abf0..b5d6c6d 100644
 +      return
 +    }
 +
++    const appBase =
++      (typeof process !== "undefined" &&
++        (process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL)
++          ?.trim()
++          .replace(/\/+$/, "")) ||
++      "https://report.ewu.tools"
++    const reportUrl = input.sharePath.startsWith("http")
++      ? input.sharePath
++      : `${appBase}${input.sharePath.startsWith("/") ? "" : "/"}${input.sharePath}`
++
++    const descriptionText = input.description?.trim() || ""
++    // Prefer reporter description as Kan title (pageTitle is often just the app name).
++    const cardTitle = (
++      descriptionText.split("\n")[0]?.trim() ||
++      input.title ||
++      `Crikket bug ${input.id}`
++    ).slice(0, 200)
++
 +    const details = [
-+      input.description?.trim() || "",
++      descriptionText,
 +      input.url ? `Page: ${input.url}` : "",
 +      input.priority ? `Priority: ${input.priority}` : "",
-+      `Crikket report: ${input.sharePath}`,
-+      `Report ID: ${input.id}`,
++      `Crikket: ${reportUrl}`,
++      input.title && input.title !== cardTitle ? `Capture title: ${input.title}` : "",
 +    ]
 +      .filter((line) => line.length > 0)
 +      .join("\n\n")
 +
 +    createKanCardInBackground(
 +      {
-+        title: input.title || `Crikket bug ${input.id}`,
++        title: cardTitle,
 +        description: details,
 +        listPublicId,
 +      },

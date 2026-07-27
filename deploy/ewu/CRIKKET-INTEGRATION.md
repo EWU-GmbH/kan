@@ -39,6 +39,12 @@ Ziel-Board: Workspace **Businessplan** (`jzlsx66v76m2`) → Board
 | Bug-Report finalize | Card auf Kan-Liste **Bugs** (fire-and-forget) |
 | Widget → Feature Request | `POST /api/embed/feature-requests` → Kan **Feature Requests**, **kein** Crikket-Report |
 
+### Kan-Karteninhalt (Bugs)
+
+- **Titel:** Reporter-Beschreibung (Fallback: Capture-/Page-Title)
+- **Beschreibung:** Text + Seite + Priority + absoluter Link
+  `https://report.ewu.tools/s/<reportId>`
+
 ## Bitte an JW
 
 Schreibzugriff für den Cursor-Bot (oder manuelles Mergen des Patches) auf
