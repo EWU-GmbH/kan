@@ -17,13 +17,28 @@ This is a **self-host** deployment — `NEXT_PUBLIC_KAN_ENV` stays **unset** (ne
 
 ## Coolify (EWU Tools → production)
 
-1. Create a **Docker Compose** application from this repo.
-2. Base directory: `/`
-3. Compose file: `/deploy/ewu/docker-compose.coolify.yml`
-4. Attach domain **`https://kan.ewu.tools`** to the **`web`** service
-   (Coolify proxy/TLS — do not publish 80/443 from the compose).
-5. Set required envs (see below), then deploy. The `migrate` container runs
+Live resource (created via Coolify API):
+
+| Field | Value |
+| --- | --- |
+| Project / Env | `EWU Tools` → `production` |
+| Application | `kan` (`k13ibf0q1ndgzds5loh0u8n1`) |
+| Branch | `cursor/coolify-kan-deploy-f3b3` (until merged) |
+| Compose | `/deploy/ewu/docker-compose.coolify.yml` |
+| Domain on `web` | `https://kan.ewu.tools` |
+
+### Setup checklist
+
+1. Create a **Docker Compose** application from this repo (base `/`, compose path above).
+2. Attach domain **`https://kan.ewu.tools`** to the **`web`** service
+   (Coolify Traefik proxy/TLS — do not publish 80/443 from the compose).
+3. Set required envs (see below), then deploy. The `migrate` container runs
    Drizzle migrations once; `web` starts after it succeeds.
+4. **DNS (required for Let's Encrypt):** create an **A record**
+   `kan.ewu.tools` → `104.248.136.0` at the udag DNS for `ewu.tools`
+   (`ns.udag.de` / `ns.udag.net` / `ns.udag.org`). Without it Traefik serves the
+   default cert and ACME fails with `NXDOMAIN`. After DNS propagates, restart
+   the `web` container (or redeploy) so Traefik retries ACME.
 
 ### Required environment variables
 
