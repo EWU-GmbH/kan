@@ -34,11 +34,9 @@ Live resource (created via Coolify API):
    (Coolify Traefik proxy/TLS — do not publish 80/443 from the compose).
 3. Set required envs (see below), then deploy. The `migrate` container runs
    Drizzle migrations once; `web` starts after it succeeds.
-4. **DNS (required for Let's Encrypt):** create an **A record**
-   `kan.ewu.tools` → `104.248.136.0` at the udag DNS for `ewu.tools`
-   (`ns.udag.de` / `ns.udag.net` / `ns.udag.org`). Without it Traefik serves the
-   default cert and ACME fails with `NXDOMAIN`. After DNS propagates, restart
-   the `web` container (or redeploy) so Traefik retries ACME.
+4. **DNS / TLS:** A-Record `kan.ewu.tools` → `104.248.136.0` is set (udag).
+   Let's Encrypt cert issued (`CN=kan.ewu.tools`, issuer Let's Encrypt).
+   Verified: `https://kan.ewu.tools/login` and `/api/auth/ok` return `200`.
 
 ### Required environment variables
 
