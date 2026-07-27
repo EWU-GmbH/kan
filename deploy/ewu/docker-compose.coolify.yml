@@ -1,0 +1,82 @@
+# EWU Kan on Coolify (kan.ewu.tools)
+#
+# Coolify Traefik terminates TLS and reverse-proxies to `web:3000`.
+# Do NOT include Caddy here — ports 80/443 belong to coolify-proxy.
+#
+# Coolify settings:
+#   Build Pack: Docker Compose
+#   Base Directory: /
+#   Docker Compose Location: /deploy/ewu/docker-compose.coolify.yml
+#   Domain on service `web`: https://kan.ewu.tools
+#
+# Self-host: leave NEXT_PUBLIC_KAN_ENV unset (never "cloud").
+
+services:
+  migrate:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      target: migrate
+    environment:
+      - POSTGRES_URL=${POSTGRES_URL}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+
+  web:
+    build:
+      context: ../..
+      dockerfile: apps/web/Dockerfile
+      target: web
+      args:
+        APP_VERSION: ${APP_VERSION:-}
+    # Coolify proxies this port (no host publish of 80/443).
+    ports:
+      - "3000"
+    environment:
+      - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
+      - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
+      - POSTGRES_URL=${POSTGRES_URL}
+      - BETTER_AUTH_TRUSTED_ORIGINS=${BETTER_AUTH_TRUSTED_ORIGINS}
+      - NEXT_PUBLIC_USE_STANDALONE_OUTPUT=true
+      - NEXT_PUBLIC_ALLOW_CREDENTIALS=${NEXT_PUBLIC_ALLOW_CREDENTIALS:-true}
+      - NEXT_PUBLIC_DISABLE_SIGN_UP=${NEXT_PUBLIC_DISABLE_SIGN_UP:-false}
+      - NEXT_PUBLIC_DISABLE_EMAIL=${NEXT_PUBLIC_DISABLE_EMAIL:-true}
+      - NEXT_PUBLIC_WHITE_LABEL_HIDE_POWERED_BY=${NEXT_PUBLIC_WHITE_LABEL_HIDE_POWERED_BY:-true}
+      - KAN_ADMIN_API_KEY=${KAN_ADMIN_API_KEY}
+      - REDIS_URL=${REDIS_URL}
+      - LOG_LEVEL=${LOG_LEVEL:-info}
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "node -e \"fetch('http://127.0.0.1:3000/api/auth/ok').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))\"",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 40s
+
+  postgres:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-kan_db}
+      - POSTGRES_USER=${POSTGRES_USER:-kan}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+    volumes:
+      - kan_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test:
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-kan} -d ${POSTGRES_DB:-kan_db}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  kan_postgres_data:

@@ -1,0 +1,119 @@
+# EWU Kan — Self-Hosting (kan.ewu.tools)
+
+Self-hosted Kan for EWU on DigitalOcean (Frankfurt). Images are **built from this
+fork** (`EWU-GmbH/kan`) so EWU-specific code (e.g. the Crikket → Kan
+integration) ships with the deployment.
+
+This is a **self-host** deployment — `NEXT_PUBLIC_KAN_ENV` stays **unset** (never
+`cloud`), which keeps Stripe/billing and cloud-only behaviour disabled.
+
+## Files
+
+- `docker-compose.coolify.yml` — **preferred on Coolify**: `web`, `migrate`
+  (run-once), `postgres`. Coolify Traefik handles reverse-proxy + TLS; no Caddy.
+- `docker-compose.yml` — standalone Droplet stack with bundled **Caddy** (TLS).
+- `Caddyfile` — used only by the standalone compose.
+- `.env.example` — copy to `.env` (standalone) or mirror into Coolify envs.
+
+## Coolify (EWU Tools → production)
+
+1. Create a **Docker Compose** application from this repo.
+2. Base directory: `/`
+3. Compose file: `/deploy/ewu/docker-compose.coolify.yml`
+4. Attach domain **`https://kan.ewu.tools`** to the **`web`** service
+   (Coolify proxy/TLS — do not publish 80/443 from the compose).
+5. Set required envs (see below), then deploy. The `migrate` container runs
+   Drizzle migrations once; `web` starts after it succeeds.
+
+### Required environment variables
+
+| Variable | Example / notes |
+| --- | --- |
+| `BETTER_AUTH_SECRET` | 32+ char secret |
+| `POSTGRES_PASSWORD` | strong password |
+| `POSTGRES_URL` | `postgresql://kan:<POSTGRES_PASSWORD>@postgres:5432/kan_db` |
+| `NEXT_PUBLIC_BASE_URL` | `https://kan.ewu.tools` |
+| `NEXT_PUBLIC_ALLOW_CREDENTIALS` | `true` |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | `https://kan.ewu.tools` |
+
+Do **not** set `NEXT_PUBLIC_KAN_ENV`.
+
+### First run
+
+1. Open `https://kan.ewu.tools`, sign up the initial admin account(s).
+2. Set `NEXT_PUBLIC_DISABLE_SIGN_UP=true` and redeploy to lock down sign-up.
+
+## Standalone (Caddy on the Droplet)
+
+Only if Coolify is not used (ports 80/443 free on the host):
+
+```bash
+git clone https://github.com/EWU-GmbH/kan.git
+cd kan/deploy/ewu
+cp .env.example .env
+# fill BETTER_AUTH_SECRET, POSTGRES_PASSWORD, POSTGRES_URL, …
+docker compose up -d --build
+```
+
+## Server-side integration: Crikket → Kan
+
+All Kan API access is **server-side only** — the credential must never reach the
+browser/widget.
+
+- **Auth options for the REST API (`/api/v1/*`):**
+  - Better Auth **API key** — send `Authorization: Bearer <API_KEY>` or
+    `x-api-key: <API_KEY>` (the app resolves a session from the key).
+  - A valid **session cookie** (verified working end-to-end against the built
+    image: `POST /api/v1/cards` → `200 {"publicId": "..."}`).
+- **Provisioning the service API key (part 3 task):** the Better Auth
+  self-service endpoint `POST /api/auth/api-key/create` currently returns `403`
+  for a normal user session, so the Crikket service key must be minted through a
+  trusted path — e.g. a small server-side script using the Better Auth server
+  API, or by enabling key creation for the service account. Store the resulting
+  key in Crikket's server secrets only.
+- `KAN_ADMIN_API_KEY` (sent as `x-admin-api-key`) authorizes the admin-only
+  procedures, not `card:create`.
+- **Create a card** (used for Crikket bugs and widget feature requests):
+
+  ```http
+  POST https://kan.ewu.tools/api/v1/cards
+  Authorization: Bearer <API_KEY>
+  Content-Type: application/json
+
+  {
+    "title": "Bug: ...",
+    "description": "Reported via Crikket ...",
+    "listPublicId": "<12-char list publicId>",
+    "labelPublicIds": [],
+    "memberPublicIds": [],
+    "position": "end"
+  }
+  ```
+
+  The API key's user must have `card:create` permission in the workspace that
+  owns `listPublicId`. Look up board/list `publicId`s via the corresponding
+  `GET /api/v1/...` endpoints (OpenAPI spec at `/api/v1/openapi.json`).
+
+Flow to wire up (in the Crikket backend, not this repo):
+
+1. **Crikket bugs → Kan cards:** on bug creation, Crikket's backend calls
+   `POST /api/v1/cards` against the target "Bugs" list.
+2. **Widget feature requests → Kan directly:** the feature-request path posts
+   to a Crikket backend endpoint which forwards to `POST /api/v1/cards` on the
+   "Feature requests" list — **without** creating a Crikket report.
+
+Keep the Kan API key in Crikket's server-side secrets only.
+
+### Part 3 checklist (prepare after Smoke-Test)
+
+1. In Kan UI: Workspace + Board **Crikket Bugs** + lists **Bugs** /
+   **Feature requests**; note each list `publicId`.
+2. Mint a Better Auth API key for a service user with `card:create` (trusted
+   server path — not the browser `api-key/create` endpoint).
+3. Store in Crikket server secrets only:
+   - `KAN_BASE_URL=https://kan.ewu.tools`
+   - `KAN_API_KEY=<bearer/x-api-key>`
+   - `KAN_BUGS_LIST_PUBLIC_ID=...`
+   - `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=...`
+4. Implement Crikket server handlers that `POST /api/v1/cards` with
+   `Authorization: Bearer` or `x-api-key` (never from the widget).
