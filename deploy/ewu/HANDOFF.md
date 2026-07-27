@@ -91,4 +91,10 @@ Smoke-Test nach Redeploy (`5e9d8b7`):
 
 1. ~~Fix deployen + Smoke-Test~~ erledigt.
 2. ~~Board/Listen + `kan_`-API-Key~~ erledigt.
-3. **Offen:** Crikket-Repo-Name/Org von JW erfragen und Teil 3 dort umsetzen.
+3. **Crikket-Integration implementiert**, aber Push auf `EWU-GmbH/crikket`
+   fehlt (403). Patch + Anleitung:
+   `deploy/ewu/crikket-kan-integration.patch`,
+   `deploy/ewu/CRIKKET-INTEGRATION.md`.
+   **JW:** Schreibrechte für Cursor-Bot auf `EWU-GmbH/crikket` freigeben
+   oder Patch manuell anwenden und auf Coolify (`report.ewu.tools`) die
+   `KAN_*`-Env setzen.
