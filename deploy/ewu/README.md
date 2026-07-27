@@ -1,8 +1,6 @@
 # EWU Kan — Self-Hosting (kan.ewu.tools)
 
-Self-hosted Kan for EWU on DigitalOcean (Frankfurt), mirroring the Crikket
-setup on `report.ewu.tools`: **Caddy** terminates TLS and reverse-proxies to a
-**Kan web** container, with a **bundled Postgres**. Images are **built from this
+Self-hosted Kan for EWU on DigitalOcean (Frankfurt). Images are **built from this
 fork** (`EWU-GmbH/kan`) so EWU-specific code (e.g. the Crikket → Kan
 integration) ships with the deployment.
 
@@ -11,44 +9,64 @@ This is a **self-host** deployment — `NEXT_PUBLIC_KAN_ENV` stays **unset** (ne
 
 ## Files
 
-- `docker-compose.yml` — `caddy`, `web`, `migrate` (run-once), `postgres`.
-- `Caddyfile` — automatic HTTPS + reverse proxy for `${KAN_DOMAIN}`.
-- `.env.example` — copy to `.env` and fill in.
+- `docker-compose.coolify.yml` — **preferred on Coolify**: `web`, `migrate`
+  (run-once), `postgres`. Coolify Traefik handles reverse-proxy + TLS; no Caddy.
+- `docker-compose.yml` — standalone Droplet stack with bundled **Caddy** (TLS).
+- `Caddyfile` — used only by the standalone compose.
+- `.env.example` — copy to `.env` (standalone) or mirror into Coolify envs.
 
-## Prerequisites
+## Coolify (EWU Tools → production)
 
-- A DigitalOcean droplet in Frankfurt (FRA) with Docker + compose plugin.
-- DNS: an **A record** for `kan.ewu.tools` → the droplet's public IP.
-- Ports **80** and **443** open in the droplet firewall (needed for Let's Encrypt).
+Live resource (created via Coolify API):
 
-## Deploy
+| Field | Value |
+| --- | --- |
+| Project / Env | `EWU Tools` → `production` |
+| Application | `kan` (`k13ibf0q1ndgzds5loh0u8n1`) |
+| Branch | `cursor/ewu-selfhost-deploy-09e8` |
+| Compose | `/deploy/ewu/docker-compose.coolify.yml` |
+| Domain on `web` | `https://kan.ewu.tools` |
 
-```bash
-# on the droplet
-git clone https://github.com/EWU-GmbH/kan.git
-cd kan/deploy/ewu
-cp .env.example .env
-# edit .env: set BETTER_AUTH_SECRET, POSTGRES_PASSWORD, POSTGRES_URL password,
-# KAN_ADMIN_API_KEY, ACME_EMAIL, etc.
-docker compose up -d --build
-docker compose logs -f web
-```
+### Setup checklist
 
-The `migrate` container runs Drizzle migrations once and exits; `web` starts
-only after it completes successfully. Caddy obtains a certificate for
-`kan.ewu.tools` automatically on first request.
+1. Create a **Docker Compose** application from this repo (base `/`, compose path above).
+2. Attach domain **`https://kan.ewu.tools`** to the **`web`** service
+   (Coolify Traefik proxy/TLS — do not publish 80/443 from the compose).
+3. Set required envs (see below), then deploy. The `migrate` container runs
+   Drizzle migrations once; `web` starts after it succeeds.
+4. **DNS / TLS:** A-Record `kan.ewu.tools` → `104.248.136.0` is set (udag).
+   Let's Encrypt cert issued (`CN=kan.ewu.tools`, issuer Let's Encrypt).
+   Verified: `https://kan.ewu.tools/login` and `/api/auth/ok` return `200`.
 
-### Managing
+### Required environment variables
 
-- Logs: `docker compose logs -f web` (or `caddy`, `migrate`, `postgres`)
-- Update to latest fork code: `git pull && docker compose up -d --build`
-- Stop: `docker compose down` (data persists in the `kan_postgres_data` volume)
+| Variable | Example / notes |
+| --- | --- |
+| `BETTER_AUTH_SECRET` | 32+ char secret |
+| `POSTGRES_PASSWORD` | strong password |
+| `POSTGRES_URL` | `postgresql://kan:<POSTGRES_PASSWORD>@postgres:5432/kan_db` |
+| `NEXT_PUBLIC_BASE_URL` | `https://kan.ewu.tools` |
+| `NEXT_PUBLIC_ALLOW_CREDENTIALS` | `true` |
+| `BETTER_AUTH_TRUSTED_ORIGINS` | `https://kan.ewu.tools` |
+
+Do **not** set `NEXT_PUBLIC_KAN_ENV`.
 
 ### First run
 
 1. Open `https://kan.ewu.tools`, sign up the initial admin account(s).
-2. Set `NEXT_PUBLIC_DISABLE_SIGN_UP=true` in `.env` and
-   `docker compose up -d` to lock down public sign-up.
+2. Set `NEXT_PUBLIC_DISABLE_SIGN_UP=true` and redeploy to lock down sign-up.
+
+## Standalone (Caddy on the Droplet)
+
+Only if Coolify is not used (ports 80/443 free on the host):
+
+```bash
+git clone https://github.com/EWU-GmbH/kan.git
+cd kan/deploy/ewu
+cp .env.example .env
+# fill BETTER_AUTH_SECRET, POSTGRES_PASSWORD, POSTGRES_URL, …
+docker compose up -d --build
+```
 
 ## Server-side integration: Crikket → Kan
 
@@ -98,3 +116,28 @@ Flow to wire up (in the Crikket backend, not this repo):
    "Feature requests" list — **without** creating a Crikket report.
 
 Keep the Kan API key in Crikket's server-side secrets only.
+
+### Part 3 checklist (prepare after Smoke-Test)
+
+Seeded on the Coolify instance during smoke-test (public IDs only):
+
+| Entity | `publicId` |
+| --- | --- |
+| Workspace **EWU** | `6cpeij3lcd5x` |
+| Board **Crikket Bugs** | `7ia2a9abkak6` |
+| List **Bugs** | `bcj9ygu32fj5` |
+| List **Feature requests** | `sru6aee09wjs` |
+
+1. Mint a Better Auth API key for a user with `card:create`
+   (`POST /api/auth/api-key/create` works for a normal session on this build;
+   keep the key server-side only). Verified: `Authorization: Bearer` and
+   `x-api-key` both return `200` on `POST /api/v1/cards`.
+2. Store in **Crikket** server secrets only:
+   - `KAN_BASE_URL=https://kan.ewu.tools`
+   - `KAN_API_KEY=<bearer/x-api-key>`
+   - `KAN_BUGS_LIST_PUBLIC_ID=bcj9ygu32fj5`
+   - `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=sru6aee09wjs`
+3. Implement Crikket server handlers that `POST /api/v1/cards` with
+   `Authorization: Bearer` or `x-api-key` (never from the widget).
+4. Ops note with the live API key is on the droplet at
+   `/root/kan-part3-notes.txt` (mode `600`, not in git).
