@@ -45,6 +45,17 @@ Ziel-Board: Workspace **Businessplan** (`jzlsx66v76m2`) → Board
 - **Beschreibung:** Text + Seite + Priority + absoluter Link
   `https://report.ewu.tools/s/<reportId>`
 
+### Widget: Feature Request
+
+Das Capture-SDK braucht den Button **Feature Request** im Chooser
+(nicht nur Video/Screenshot). Aktuelles Bundle:
+
+- `https://report.ewu.tools/crikket-capture.js` (Caddy static)
+- Business Plan Buddy: `public/crikket-capture.js` (Lovable/Railway)
+
+Server-Endpoint: `POST /api/embed/feature-requests` → Kan-Liste
+`KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID`.
+
 ### Ops-Hinweis (Coolify)
 
 `web` nutzt `network_mode: service:server`. **Nie nur den Server-Container
