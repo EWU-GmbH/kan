@@ -22,15 +22,30 @@ Nur **serverseitig** (nie `NEXT_PUBLIC_*`):
 
 ```bash
 KAN_BASE_URL=https://kan.ewu.tools
-KAN_API_KEY=kan_…          # API-Key eines Users mit Zugang zu Workspace Businessplan
-KAN_BUGS_LIST_PUBLIC_ID=e6a333d69f2c              # Board app.businesswisser.de → Bugs
-KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=41f75d877d19  # Board app.businesswisser.de → Feature Requests
+KAN_API_KEY=kan_…          # API-Key mit Zugang zu Businessplan + CDS
+KAN_BUGS_LIST_PUBLIC_ID=e6a333d69f2c              # Fallback (Businesswisser)
+KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=41f75d877d19  # Fallback (Businesswisser)
+# Per-Org-Routing (maßgeblich):
+KAN_ORG_LISTS_JSON={"whvEWeBUiBvn984MtYuCU2A7YGlEExQg":{"bugs":"e6a333d69f2c","featureRequests":"41f75d877d19"},"QCoNhmZ0gVQnV4VXcLBiMvd035wmsLkV":{"bugs":"wgj1t0vbr211","featureRequests":"ptd7pmo082a2"}}
 ```
 
-Ziel-Board: Workspace **Businessplan** (`jzlsx66v76m2`) → Board
-**app.businesswisser.de** (`92381e771662`).
+Ziel-Boards:
+
+| App | Workspace | Board | Bugs | Feature Requests |
+| --- | --- | --- | --- | --- |
+| Businesswisser | `jzlsx66v76m2` | `92381e771662` | `e6a333d69f2c` | `41f75d877d19` |
+| CDS | `z58gvnem0ors` | `6z6sc53ivb24` | `wgj1t0vbr211` | `ptd7pmo082a2` |
 
 Ältere EWU/Crikket-Listen (`bcj9ygu32fj5` / `sru6aee09wjs`) nicht mehr verwenden.
+
+### CDS Widget
+
+- App: `https://cds.ewu-web.de` (Entwicklung in Cursor, nicht Lovable)
+- Capture Public Key: `crk_K6o0Bu7OvDhTx3e8QCzIkjna28HeEDUck6B3SoP`
+- Script: `https://report.ewu.tools/crikket-capture.js`
+- Allowed Origins: `https://cds.ewu-web.de`, localhost
+- Widget-Einbindung: im CDS-Frontend (Cursor-Repo), analog Business Plan Buddy
+  (`CrikketCapture` lädt Script + `init({ key, host })`)
 
 ## Verhalten
 

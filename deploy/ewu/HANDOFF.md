@@ -59,6 +59,8 @@ Smoke-Test nach Redeploy: Workspace ohne URL-Feld anlegen muss `200` liefern.
 
 ## Seed / IDs (Live) — aktiv für Crikket
 
+### Businesswisser (Crikket-Org **EWU**)
+
 | Entity | `publicId` |
 | --- | --- |
 | Workspace **Businessplan** | `jzlsx66v76m2` |
@@ -66,6 +68,23 @@ Smoke-Test nach Redeploy: Workspace ohne URL-Feld anlegen muss `200` liefern.
 | Liste **Bugs** | `e6a333d69f2c` |
 | Liste **Feature Requests** | `41f75d877d19` |
 | Liste **Done** | `20e57e57d3f9` |
+
+### CDS (Crikket-Org **CDS**)
+
+| Entity | `publicId` |
+| --- | --- |
+| Workspace **CDS** | `z58gvnem0ors` |
+| Board **cds.ewu-web.de** | `6z6sc53ivb24` |
+| Liste **Bugs** | `wgj1t0vbr211` |
+| Liste **Feature Requests** | `ptd7pmo082a2` |
+| Liste **Done** | `0ebxcylyclo5` |
+
+Crikket Org-IDs (für `KAN_ORG_LISTS_JSON`):
+
+| App | Crikket `organizationId` | Capture Public Key |
+| --- | --- | --- |
+| Businesswisser | `whvEWeBUiBvn984MtYuCU2A7YGlEExQg` | `crk_H5okmXcMS9H8bWHSk6YJFEQALGJJspauyedwls` |
+| CDS | `QCoNhmZ0gVQnV4VXcLBiMvd035wmsLkV` | `crk_K6o0Bu7OvDhTx3e8QCzIkjna28HeEDUck6B3SoP` |
 
 Legacy (EWU / altes Board **Crikket**, nicht mehr Ziel der Integration):
 
@@ -76,9 +95,9 @@ Legacy (EWU / altes Board **Crikket**, nicht mehr Ziel der Integration):
 | Liste **Bugs** | `bcj9ygu32fj5` |
 | Liste **Feature Requests** | `sru6aee09wjs` |
 
-Coolify Crikket (`report.ewu.tools`) zeigt seit 2026-07-27 auf die
-Businessplan-Listen oben. API-Key muss Workspace-Zugang zu **Businessplan**
-haben.
+Coolify Crikket (`report.ewu.tools`) routet per Org über `KAN_ORG_LISTS_JSON`.
+API-Key muss Zugang zu **Businessplan** und **CDS** haben (Smoke-User ist Admin
+auf beiden).
 
 ## Integrations-Contract
 
@@ -87,11 +106,11 @@ haben.
 - **Body:** `{ title, description, listPublicId, labelPublicIds:[], memberPublicIds:[], position:"end" }`
 - OpenAPI: `https://kan.ewu.tools/api/v1/openapi.json`
 
-**Crikket → Kan (live):**
-- Bugs → Liste `e6a333d69f2c` (Board app.businesswisser.de)
-- Widget-Features → Liste `41f75d877d19` (ohne Report)
+**Crikket → Kan (live, org-basiert):**
+- Org EWU → Bugs `e6a333d69f2c` / Features `41f75d877d19` (Businesswisser)
+- Org CDS → Bugs `wgj1t0vbr211` / Features `ptd7pmo082a2` (CDS)
 - Secrets: `KAN_BASE_URL`, `KAN_API_KEY`, `KAN_BUGS_LIST_PUBLIC_ID`,
-  `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID`
+  `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID` (Fallback), `KAN_ORG_LISTS_JSON`
 
 ## Nächste Schritte
 
