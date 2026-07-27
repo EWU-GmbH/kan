@@ -106,14 +106,25 @@ Keep the Kan API key in Crikket's server-side secrets only.
 
 ### Part 3 checklist (prepare after Smoke-Test)
 
-1. In Kan UI: Workspace + Board **Crikket Bugs** + lists **Bugs** /
-   **Feature requests**; note each list `publicId`.
-2. Mint a Better Auth API key for a service user with `card:create` (trusted
-   server path — not the browser `api-key/create` endpoint).
-3. Store in Crikket server secrets only:
+Seeded on the Coolify instance during smoke-test (public IDs only):
+
+| Entity | `publicId` |
+| --- | --- |
+| Workspace **EWU** | `6cpeij3lcd5x` |
+| Board **Crikket Bugs** | `7ia2a9abkak6` |
+| List **Bugs** | `bcj9ygu32fj5` |
+| List **Feature requests** | `sru6aee09wjs` |
+
+1. Mint a Better Auth API key for a user with `card:create`
+   (`POST /api/auth/api-key/create` works for a normal session on this build;
+   keep the key server-side only). Verified: `Authorization: Bearer` and
+   `x-api-key` both return `200` on `POST /api/v1/cards`.
+2. Store in **Crikket** server secrets only:
    - `KAN_BASE_URL=https://kan.ewu.tools`
    - `KAN_API_KEY=<bearer/x-api-key>`
-   - `KAN_BUGS_LIST_PUBLIC_ID=...`
-   - `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=...`
-4. Implement Crikket server handlers that `POST /api/v1/cards` with
+   - `KAN_BUGS_LIST_PUBLIC_ID=bcj9ygu32fj5`
+   - `KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID=sru6aee09wjs`
+3. Implement Crikket server handlers that `POST /api/v1/cards` with
    `Authorization: Bearer` or `x-api-key` (never from the widget).
+4. Ops note with the live API key is on the droplet at
+   `/root/kan-part3-notes.txt` (mode `600`, not in git).
