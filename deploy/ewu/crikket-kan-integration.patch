@@ -293,7 +293,7 @@ index cc2abf0..b5d6c6d 100644
 +      descriptionText,
 +      input.url ? `Page: ${input.url}` : "",
 +      input.priority ? `Priority: ${input.priority}` : "",
-+      `Crikket: ${reportUrl}`,
++      `<a href="${reportUrl}" target="_blank" rel="noopener noreferrer">Feedback öffnen</a>`,
 +      input.title && input.title !== cardTitle ? `Capture title: ${input.title}` : "",
 +    ]
 +      .filter((line) => line.length > 0)

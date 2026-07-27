@@ -42,8 +42,8 @@ Ziel-Board: Workspace **Businessplan** (`jzlsx66v76m2`) → Board
 ### Kan-Karteninhalt (Bugs)
 
 - **Titel:** Reporter-Beschreibung (Fallback: Capture-/Page-Title)
-- **Beschreibung:** Text + Seite + Priority + absoluter Link
-  `https://report.ewu.tools/s/<reportId>`
+- **Beschreibung:** Text + Seite + Priority + klickbarer HTML-Link
+  `Feedback öffnen` → `https://report.ewu.tools/s/<reportId>` (neuer Tab)
 
 ### Widget: Feature Request
 
