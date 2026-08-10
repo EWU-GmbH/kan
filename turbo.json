@@ -155,7 +155,9 @@
     "AXIOM_TOKEN",
     "AXIOM_DATASET",
     "KAN_BASE_URL",
-    "KAN_API_TOKEN"
+    "KAN_API_TOKEN",
+    "CRIKKET_BASE_URL",
+    "CRIKKET_API_KEY"
   ],
   "globalPassThroughEnv": [
     "NODE_ENV",

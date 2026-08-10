@@ -126,6 +126,10 @@ services:
       - APPLE_CLIENT_ID=${APPLE_CLIENT_ID}
       - APPLE_CLIENT_SECRET=${APPLE_CLIENT_SECRET}
       - APPLE_APP_BUNDLE_IDENTIFIER=${APPLE_APP_BUNDLE_IDENTIFIER}
+
+      # Crikket integration (optional)
+      - CRIKKET_BASE_URL=${CRIKKET_BASE_URL}
+      - CRIKKET_API_KEY=${CRIKKET_API_KEY}
     depends_on:
       migrate:
         condition: service_completed_successfully

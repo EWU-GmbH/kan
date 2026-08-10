@@ -33,6 +33,8 @@ import { DeleteCardConfirmation } from "./components/DeleteCardConfirmation";
 import { DeleteChecklistConfirmation } from "./components/DeleteChecklistConfirmation";
 import { DeleteCommentConfirmation } from "./components/DeleteCommentConfirmation";
 import Dropdown from "./components/Dropdown";
+import CrikketReporterFollowUpButton from "./components/CrikketReporterFollowUpButton";
+import CrikketReporterFollowUpModal from "./components/CrikketReporterFollowUpModal";
 import { DueDateSelector } from "./components/DueDateSelector";
 import LabelSelector from "./components/LabelSelector";
 import ListSelector from "./components/ListSelector";
@@ -355,6 +357,12 @@ export default function CardPage({ isTemplate }: { isTemplate?: boolean }) {
                   )}
               </div>
               <div className="flex items-center gap-2">
+                {!isTemplate && (
+                  <CrikketReporterFollowUpButton
+                    cardPublicId={cardId}
+                    disabled={!canEdit}
+                  />
+                )}
                 <Dropdown
                   cardPublicId={cardId}
                   isTemplate={isTemplate}
@@ -582,6 +590,13 @@ export default function CardPage({ isTemplate }: { isTemplate?: boolean }) {
             isVisible={isOpen && modalContentType === "EDIT_YOUTUBE"}
           >
             <EditYouTubeModal />
+          </Modal>
+
+          <Modal
+            modalSize="sm"
+            isVisible={isOpen && modalContentType === "CRIKKET_REPORTER_FOLLOW_UP"}
+          >
+            <CrikketReporterFollowUpModal cardPublicId={cardId} />
           </Modal>
         </>
       </div>
