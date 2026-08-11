@@ -1,0 +1,24 @@
+# Caddy reverse proxy for the EWU Kan instance.
+# Automatic HTTPS via Let's Encrypt for {$KAN_DOMAIN}.
+# The web container is only reachable on the internal docker network.
+{
+	email {$ACME_EMAIL}
+}
+
+{$KAN_DOMAIN} {
+	encode zstd gzip
+
+	# Kan runs the Next.js standalone server on port 3000.
+	reverse_proxy web:3000
+
+	# Reasonable upload ceiling (attachments etc.). Keep in sync with
+	# NEXT_API_BODY_SIZE_LIMIT if you raise it.
+	request_body {
+		max_size 50MB
+	}
+
+	log {
+		output stdout
+		format console
+	}
+}

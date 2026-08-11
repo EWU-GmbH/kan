@@ -127,9 +127,11 @@ export function NewWorkspaceForm() {
       return;
     }
 
+    // Empty slug must be omitted — API Zod rejects "" (min 3) even though
+    // the field is optional; the server falls back to the publicId.
     createWorkspace.mutate({
       name: values.name,
-      slug: values.slug,
+      ...(values.slug ? { slug: values.slug } : {}),
     });
   };
 

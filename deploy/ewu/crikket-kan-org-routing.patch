@@ -1,0 +1,246 @@
+diff --git a/apps/server/src/capture/feature-request-route.ts b/apps/server/src/capture/feature-request-route.ts
+index a460d0a..6f24820 100644
+--- a/apps/server/src/capture/feature-request-route.ts
++++ b/apps/server/src/capture/feature-request-route.ts
+@@ -44,7 +44,9 @@ export async function handleFeatureRequest(input: {
+       (await input.request.json()) as unknown
+     )
+ 
+-    const listPublicId = getKanFeatureRequestsListPublicId()
++    const listPublicId = getKanFeatureRequestsListPublicId(
++      authorization.organizationId
++    )
+     if (!listPublicId) {
+       throw new ORPCError("BAD_REQUEST", {
+         message: "Kan feature-request integration is not configured.",
+@@ -53,10 +55,10 @@ export async function handleFeatureRequest(input: {
+ 
+     const descriptionParts = [
+       body.description,
+-      body.pageUrl ? `Page: ${body.pageUrl}` : "",
++      body.pageUrl ? `Page: <a href="${body.pageUrl}" target="_blank" rel="noopener noreferrer">${body.pageUrl}</a>` : "",
+       body.pageTitle ? `Page title: ${body.pageTitle}` : "",
+       `Origin: ${authorization.origin}`,
+-      "Source: Crikket widget feature request (no Crikket report).",
++      "Source: Widget-Featurewunsch (ohne Bug-Report).",
+     ].filter((line) => line.length > 0)
+ 
+     const card = await createKanCard({
+diff --git a/packages/bug-reports/src/lib/upload-session.ts b/packages/bug-reports/src/lib/upload-session.ts
+index b5d6c6d..c6a1181 100644
+--- a/packages/bug-reports/src/lib/upload-session.ts
++++ b/packages/bug-reports/src/lib/upload-session.ts
+@@ -397,13 +397,16 @@ export async function finalizeBugReportUpload(input: {
+   }
+ 
+   // Sync to EWU Kan "Bugs" list (server-side; never blocks report creation).
+-  void syncBugReportToKan({
++  syncBugReportToKan({
+     id: uploadSession.id,
+-    title: uploadSession.title,
++    organizationId: uploadSession.organizationId,
++    title: uploadSession.title ?? `Crikket bug ${uploadSession.id}`,
+     description: uploadSession.description,
+     url: uploadSession.url,
+     priority: uploadSession.priority,
+     sharePath: `/s/${uploadSession.id}`,
++  }).catch((error: unknown) => {
++    console.error("[kan] failed to queue bug-report sync", error)
+   })
+ 
+   return {
+@@ -416,6 +419,7 @@ export async function finalizeBugReportUpload(input: {
+ 
+ async function syncBugReportToKan(input: {
+   id: string
++  organizationId: string
+   title: string
+   description: string | null
+   url: string | null
+@@ -426,24 +430,45 @@ async function syncBugReportToKan(input: {
+     const { createKanCardInBackground, getKanBugsListPublicId } = await import(
+       "@crikket/kan/client"
+     )
+-    const listPublicId = getKanBugsListPublicId()
++    const listPublicId = getKanBugsListPublicId(input.organizationId)
+     if (!listPublicId) {
+       return
+     }
+ 
++    const appBase =
++      (typeof process !== "undefined" &&
++        (process.env.BETTER_AUTH_URL || process.env.NEXT_PUBLIC_APP_URL)
++          ?.trim()
++          .replace(/\/+$/, "")) ||
++      "https://report.ewu.tools"
++    const reportUrl = input.sharePath.startsWith("http")
++      ? input.sharePath
++      : `${appBase}${input.sharePath.startsWith("/") ? "" : "/"}${input.sharePath}`
++
++    const descriptionText = input.description?.trim() || ""
++    const cardTitle = (
++      descriptionText.split("\n")[0]?.trim() ||
++      input.title ||
++      `Crikket bug ${input.id}`
++    ).slice(0, 200)
++
++    const feedbackLink = `<a href="${reportUrl}" target="_blank" rel="noopener noreferrer">Feedback öffnen</a>`
++    const pageLine = input.url
++      ? `Page: <a href="${input.url}" target="_blank" rel="noopener noreferrer">${input.url}</a>`
++      : ""
+     const details = [
+-      input.description?.trim() || "",
+-      input.url ? `Page: ${input.url}` : "",
++      descriptionText,
++      pageLine,
+       input.priority ? `Priority: ${input.priority}` : "",
+-      `Crikket report: ${input.sharePath}`,
+-      `Report ID: ${input.id}`,
++      feedbackLink,
++      input.title && input.title !== cardTitle ? `Capture title: ${input.title}` : "",
+     ]
+       .filter((line) => line.length > 0)
+       .join("\n\n")
+ 
+     createKanCardInBackground(
+       {
+-        title: input.title || `Crikket bug ${input.id}`,
++        title: cardTitle,
+         description: details,
+         listPublicId,
+       },
+diff --git a/packages/env/src/server.ts b/packages/env/src/server.ts
+index 8f4dd3f..c2ce4e0 100644
+--- a/packages/env/src/server.ts
++++ b/packages/env/src/server.ts
+@@ -59,6 +59,9 @@ export const env = createEnv({
+     KAN_API_KEY: z.string().min(1).optional(),
+     KAN_BUGS_LIST_PUBLIC_ID: z.string().min(12).max(12).optional(),
+     KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID: z.string().min(12).max(12).optional(),
++    // Optional per-organization list routing, e.g.
++    // {"orgId":{"bugs":"xxxxxxxxxxxx","featureRequests":"xxxxxxxxxxxx"}}
++    KAN_ORG_LISTS_JSON: z.string().min(2).optional(),
+     NODE_ENV: z
+       .enum(["development", "production", "staging"])
+       .default("development"),
+diff --git a/packages/kan/src/client.ts b/packages/kan/src/client.ts
+index 5059d17..b5fa7eb 100644
+--- a/packages/kan/src/client.ts
++++ b/packages/kan/src/client.ts
+@@ -1,5 +1,7 @@
+ import { env } from "@crikket/env/server"
+ 
++const TRAILING_SLASHES_REGEX = /\/+$/
++
+ export interface CreateKanCardInput {
+   title: string
+   description?: string
+@@ -10,20 +12,84 @@ export interface CreateKanCardResult {
+   publicId: string
+ }
+ 
++type OrgListMapping = {
++  bugs?: string
++  featureRequests?: string
++}
++
++function parseOrgLists(): Record<string, OrgListMapping> {
++  const raw = env.KAN_ORG_LISTS_JSON?.trim()
++  if (!raw) {
++    return {}
++  }
++
++  try {
++    const parsed = JSON.parse(raw) as unknown
++    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
++      console.error("[kan] KAN_ORG_LISTS_JSON must be a JSON object")
++      return {}
++    }
++
++    const result: Record<string, OrgListMapping> = {}
++    for (const [orgId, value] of Object.entries(
++      parsed as Record<string, unknown>
++    )) {
++      if (!value || typeof value !== "object" || Array.isArray(value)) {
++        continue
++      }
++      const entry = value as Record<string, unknown>
++      const bugs =
++        typeof entry.bugs === "string" ? entry.bugs.trim() : undefined
++      const featureRequests =
++        typeof entry.featureRequests === "string"
++          ? entry.featureRequests.trim()
++          : undefined
++      if (bugs || featureRequests) {
++        result[orgId] = { bugs, featureRequests }
++      }
++    }
++    return result
++  } catch (error) {
++    console.error("[kan] failed to parse KAN_ORG_LISTS_JSON", error)
++    return {}
++  }
++}
++
+ export function isKanIntegrationEnabled(): boolean {
++  const orgLists = parseOrgLists()
++  const hasOrgLists = Object.values(orgLists).some(
++    (entry) => entry.bugs || entry.featureRequests
++  )
+   return Boolean(
+     env.KAN_API_KEY?.trim() &&
+       env.KAN_BASE_URL?.trim() &&
+-      (env.KAN_BUGS_LIST_PUBLIC_ID?.trim() ||
++      (hasOrgLists ||
++        env.KAN_BUGS_LIST_PUBLIC_ID?.trim() ||
+         env.KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID?.trim())
+   )
+ }
+ 
+-export function getKanBugsListPublicId(): string | null {
++export function getKanBugsListPublicId(
++  organizationId?: string | null
++): string | null {
++  if (organizationId) {
++    const fromOrg = parseOrgLists()[organizationId]?.bugs?.trim()
++    if (fromOrg) {
++      return fromOrg
++    }
++  }
+   return env.KAN_BUGS_LIST_PUBLIC_ID?.trim() || null
+ }
+ 
+-export function getKanFeatureRequestsListPublicId(): string | null {
++export function getKanFeatureRequestsListPublicId(
++  organizationId?: string | null
++): string | null {
++  if (organizationId) {
++    const fromOrg = parseOrgLists()[organizationId]?.featureRequests?.trim()
++    if (fromOrg) {
++      return fromOrg
++    }
++  }
+   return env.KAN_FEATURE_REQUESTS_LIST_PUBLIC_ID?.trim() || null
+ }
+ 
+@@ -35,9 +101,9 @@ export async function createKanCard(
+   input: CreateKanCardInput
+ ): Promise<CreateKanCardResult | null> {
+   const apiKey = env.KAN_API_KEY?.trim()
+-  const baseUrl = env.KAN_BASE_URL?.trim()?.replace(/\/+$/, "")
++  const baseUrl = env.KAN_BASE_URL?.trim()?.replace(TRAILING_SLASHES_REGEX, "")
+ 
+-  if (!apiKey || !baseUrl || !input.listPublicId.trim()) {
++  if (!(apiKey && baseUrl && input.listPublicId.trim())) {
+     return null
+   }
+ 
+@@ -80,7 +146,7 @@ export function createKanCardInBackground(
+   input: CreateKanCardInput,
+   context: string
+ ): void {
+-  void createKanCard(input).catch((error: unknown) => {
++  createKanCard(input).catch((error: unknown) => {
+     console.error(`[kan] ${context} failed`, error)
+   })
+ }
