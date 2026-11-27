@@ -22,7 +22,7 @@ This is a **self-host** deployment — `NEXT_PUBLIC_KAN_ENV` stays **unset** (ne
 | Target Branch    | `main` (commit `HEAD`)                                             |
 | Build Pack       | `dockercompose` (Base Directory `/`)                               |
 | Compose Location | `/deploy/ewu/docker-compose.coolify.yml`                           |
-| Domain on `web`  | `kan.ewu.tools` (`ports: - "3000"`)                                |
+| Domain on `web`  | `kan.ewu.tools` (`expose: ["3000"]`, `ports_exposes=3000`)         |
 | Postgres Volume  | `kan_postgres_data` → `k13ibf0q1ndgzds5loh0u8n1_kan-postgres-data` |
 
 ### Notes for `main` and `v0.7.0+`
@@ -31,6 +31,10 @@ This is a **self-host** deployment — `NEXT_PUBLIC_KAN_ENV` stays **unset** (ne
   `kan_postgres_data` must stay unchanged. With Coolify's
   `compose_parsing_version=5`, `kan_postgres_data` resolves to
   `k13ibf0q1ndgzds5loh0u8n1_kan-postgres-data` so existing data is preserved.
+- **Internal port only (`expose: ["3000"]`):** `web` uses `expose: ["3000"]`
+  instead of `ports: - "3000"` so no random host port is bound. Coolify reads
+  `expose` (`firstDockerComposeServicePort`) and sets the Traefik service port
+  (`loadbalancer.server.port=3000`, matching `ports_exposes=3000`).
 - **Self-built images only:** Both `migrate` and `web` build from
   `apps/web/Dockerfile` without a `ghcr.io` `image:` tag alongside `build:`.
 - **No public Postgres port:** `postgres` has no `ports:` mapping and is only
@@ -83,11 +87,10 @@ be exposed to the browser/widget.
   `CRIKKET_API_KEY` from `web` runtime environment to look up linked feature
   requests and send reporter follow-up emails.
 
-Active Crikket target IDs (`Businessplan` / `app.businesswisser.de`):
+Active Crikket targets:
 
-| Entity                          | `publicId`     |
-| ------------------------------- | -------------- |
-| Workspace **Businessplan**      | `jzlsx66v76m2` |
-| Board **app.businesswisser.de** | `92381e771662` |
-| List **Bugs**                   | `e6a333d69f2c` |
-| List **Feature requests**       | `41f75d877d19` |
+| Target / App                                        | Workspace (`publicId`)            | Board (`publicId`)                                | List **Bugs**  | List **Feature Requests** |
+| --------------------------------------------------- | --------------------------------- | ------------------------------------------------- | -------------- | ------------------------- |
+| **Businessplan** (`app.businesswisser.de`)          | **Businessplan** (`jzlsx66v76m2`) | **app.businesswisser.de** (`92381e771662`)        | `e6a333d69f2c` | `41f75d877d19`            |
+| **CDS** (`cds.ewu-web.de`)                          | **CDS** (`z58gvnem0ors`)          | **cds.ewu-web.de** (`6z6sc53ivb24`)               | `wgj1t0vbr211` | `ptd7pmo082a2`            |
+| **Bewerbungstool** (`bewerbungstool.karriere.haus`) | **Businessplan** (`jzlsx66v76m2`) | **bewerbungstool.karriere.haus** (`7goy736me49e`) | `tt1hhu85z6ym` | `jhnmtl3k4s3y`            |

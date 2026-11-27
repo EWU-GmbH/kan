@@ -43,9 +43,8 @@ services:
       target: web
       args:
         APP_VERSION: ${APP_VERSION:-}
-    # Coolify proxies this port (no host publish of 80/443).
-    ports:
-      - "3000"
+    # Internal port only (no host port binding); Coolify reads `expose` and routes `ports_exposes=3000`.
+    expose: ["3000"]
     environment:
       - NEXT_PUBLIC_BASE_URL=${NEXT_PUBLIC_BASE_URL}
       - BETTER_AUTH_SECRET=${BETTER_AUTH_SECRET}
