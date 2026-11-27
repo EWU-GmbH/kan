@@ -1,39 +1,39 @@
-const TRAILING_SLASHES_REGEX = /\/+$/
+const TRAILING_SLASHES_REGEX = /\/+$/;
 
 export function isCrikketIntegrationEnabled(): boolean {
-  const baseUrl = process.env.CRIKKET_BASE_URL?.trim()
-  const apiKey = process.env.CRIKKET_API_KEY?.trim()
-  return Boolean(baseUrl && apiKey)
+  const baseUrl = process.env.CRIKKET_BASE_URL?.trim();
+  const apiKey = process.env.CRIKKET_API_KEY?.trim();
+  return Boolean(baseUrl && apiKey);
 }
 
 function getCrikketConfig(): { baseUrl: string; apiKey: string } | null {
-  const baseUrl = process.env.CRIKKET_BASE_URL?.trim()?.replace(
+  const baseUrl = process.env.CRIKKET_BASE_URL?.trim().replace(
     TRAILING_SLASHES_REGEX,
     "",
-  )
-  const apiKey = process.env.CRIKKET_API_KEY?.trim()
+  );
+  const apiKey = process.env.CRIKKET_API_KEY?.trim();
 
   if (!(baseUrl && apiKey)) {
-    return null
+    return null;
   }
 
-  return { baseUrl, apiKey }
+  return { baseUrl, apiKey };
 }
 
-export type CrikketFeatureRequestLookup = {
-  featureRequestId: string
-  title: string
-  hasReporterEmail: boolean
-  reporterEmail: string | null
-  status: string
+export interface CrikketFeatureRequestLookup {
+  featureRequestId: string;
+  title: string;
+  hasReporterEmail: boolean;
+  reporterEmail: string | null;
+  status: string;
 }
 
 export async function getCrikketFeatureRequestByKanCard(
   cardPublicId: string,
 ): Promise<CrikketFeatureRequestLookup | null> {
-  const config = getCrikketConfig()
+  const config = getCrikketConfig();
   if (!config) {
-    return null
+    return null;
   }
 
   const response = await fetch(
@@ -44,27 +44,27 @@ export async function getCrikketFeatureRequestByKanCard(
         Authorization: `Bearer ${config.apiKey}`,
       },
     },
-  )
+  );
 
   if (response.status === 404) {
-    return null
+    return null;
   }
 
   if (!response.ok) {
-    const body = await response.text().catch(() => "")
+    const body = await response.text().catch(() => "");
     throw new Error(
       `Crikket feature request lookup failed (${response.status}): ${body.slice(0, 500)}`,
-    )
+    );
   }
 
   const data = (await response.json()) as {
-    ok?: boolean
-    featureRequestId?: string
-    title?: string
-    hasReporterEmail?: boolean
-    reporterEmail?: string | null
-    status?: string
-  }
+    ok?: boolean;
+    featureRequestId?: string;
+    title?: string;
+    hasReporterEmail?: boolean;
+    reporterEmail?: string | null;
+    status?: string;
+  };
 
   if (
     !data.ok ||
@@ -73,7 +73,7 @@ export async function getCrikketFeatureRequestByKanCard(
     typeof data.hasReporterEmail !== "boolean" ||
     typeof data.status !== "string"
   ) {
-    throw new Error("Crikket feature request lookup returned invalid payload")
+    throw new Error("Crikket feature request lookup returned invalid payload");
   }
 
   return {
@@ -82,16 +82,16 @@ export async function getCrikketFeatureRequestByKanCard(
     hasReporterEmail: data.hasReporterEmail,
     reporterEmail: data.reporterEmail ?? null,
     status: data.status,
-  }
+  };
 }
 
 export async function sendCrikketFeatureRequestReporterFollowUp(input: {
-  cardPublicId: string
-  message: string
+  cardPublicId: string;
+  message: string;
 }): Promise<void> {
-  const config = getCrikketConfig()
+  const config = getCrikketConfig();
   if (!config) {
-    throw new Error("Crikket integration is not configured")
+    throw new Error("Crikket integration is not configured");
   }
 
   const response = await fetch(
@@ -104,22 +104,22 @@ export async function sendCrikketFeatureRequestReporterFollowUp(input: {
       },
       body: JSON.stringify({ message: input.message }),
     },
-  )
+  );
 
   if (!response.ok) {
-    let message = `Crikket reporter follow-up failed (${response.status})`
+    let message = `Crikket reporter follow-up failed (${response.status})`;
     try {
-      const data = (await response.json()) as { message?: string }
+      const data = (await response.json()) as { message?: string };
       if (data.message) {
-        message = data.message
+        message = data.message;
       }
     } catch {
-      const body = await response.text().catch(() => "")
+      const body = await response.text().catch(() => "");
       if (body) {
-        message = body.slice(0, 500)
+        message = body.slice(0, 500);
       }
     }
 
-    throw new Error(message)
+    throw new Error(message);
   }
 }

@@ -1,25 +1,33 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
+import { createLogger } from "@kan/logger";
+
+import { createTRPCRouter, protectedProcedure } from "../trpc";
 import {
   getCrikketFeatureRequestByKanCard,
   isCrikketIntegrationEnabled,
   sendCrikketFeatureRequestReporterFollowUp,
 } from "../utils/crikket-client";
-import { createTRPCRouter, protectedProcedure } from "../trpc";
 
-const cardPublicIdSchema = z.string().trim().min(12).max(12)
+const log = createLogger("crikket");
+
+const cardPublicIdSchema = z.string().trim().min(12).max(12);
 
 const followUpMessageSchema = z
   .string()
   .trim()
   .min(1, "Nachricht darf nicht leer sein")
-  .max(4000)
+  .max(4000);
 
 export const crikketRouter = createTRPCRouter({
   getFeatureRequestByCard: protectedProcedure
     .meta({
-      openapi: { enabled: false, method: "GET", path: "/crikket/feature-request" },
+      openapi: {
+        enabled: false,
+        method: "GET",
+        path: "/crikket/feature-request",
+      },
     })
     .input(z.object({ cardPublicId: cardPublicIdSchema }))
     .output(
@@ -40,20 +48,20 @@ export const crikketRouter = createTRPCRouter({
         throw new TRPCError({
           message: "User not authenticated",
           code: "UNAUTHORIZED",
-        })
+        });
       }
 
       if (!isCrikketIntegrationEnabled()) {
-        return { linked: false as const }
+        return { linked: false as const };
       }
 
       try {
         const featureRequest = await getCrikketFeatureRequestByKanCard(
           input.cardPublicId,
-        )
+        );
 
         if (!featureRequest) {
-          return { linked: false as const }
+          return { linked: false as const };
         }
 
         return {
@@ -63,13 +71,17 @@ export const crikketRouter = createTRPCRouter({
           hasReporterEmail: featureRequest.hasReporterEmail,
           reporterEmail: featureRequest.reporterEmail,
           status: featureRequest.status,
-        }
+        };
       } catch (error) {
-        console.error("[crikket] feature request lookup failed", error)
+        log.error(
+          { err: error, cardPublicId: input.cardPublicId },
+          "Crikket feature request lookup failed",
+        );
         throw new TRPCError({
-          message: "Crikket-Anfrage fehlgeschlagen. Bitte später erneut versuchen.",
+          message:
+            "Crikket-Anfrage fehlgeschlagen. Bitte später erneut versuchen.",
           code: "BAD_GATEWAY",
-        })
+        });
       }
     }),
 
@@ -93,33 +105,33 @@ export const crikketRouter = createTRPCRouter({
         throw new TRPCError({
           message: "User not authenticated",
           code: "UNAUTHORIZED",
-        })
+        });
       }
 
       if (!isCrikketIntegrationEnabled()) {
         throw new TRPCError({
           message: "Crikket-Integration ist nicht konfiguriert.",
           code: "PRECONDITION_FAILED",
-        })
+        });
       }
 
       try {
         await sendCrikketFeatureRequestReporterFollowUp({
           cardPublicId: input.cardPublicId,
           message: input.message,
-        })
+        });
       } catch (error) {
         const message =
           error instanceof Error
             ? error.message
-            : "Rückfrage konnte nicht gesendet werden."
+            : "Rückfrage konnte nicht gesendet werden.";
 
         throw new TRPCError({
           message,
           code: "BAD_REQUEST",
-        })
+        });
       }
 
-      return { success: true as const }
+      return { success: true as const };
     }),
-})
+});
