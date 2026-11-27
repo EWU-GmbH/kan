@@ -1,0 +1,215 @@
+import type { Browser, Page } from "@playwright/test";
+import { expect, test } from "@playwright/test";
+
+import { AuthPage } from "../support/pages/auth-page";
+import { BoardPage } from "../support/pages/board-page";
+import { DashboardPage } from "../support/pages/dashboard-page";
+import { MembersPage } from "../support/pages/members-page";
+import { SelfHostedOnboardingPage } from "../support/pages/self-hosted-onboarding-page";
+import { SettingsPage } from "../support/pages/settings-page";
+import { createTestUser } from "../support/test-user";
+
+async function inviteSecondMember(ownerPage: Page, browser: Browser) {
+  const members = new MembersPage(ownerPage);
+  await members.open();
+  const inviteLink = await members.createInviteLink();
+
+  const memberContext = await browser.newContext();
+  const memberPage = await memberContext.newPage();
+  const memberUser = createTestUser();
+  await new AuthPage(memberPage).signUp(memberUser);
+  await new SelfHostedOnboardingPage(memberPage).createFirstWorkspace(
+    "Member's Own Workspace",
+  );
+  await memberPage.goto(inviteLink);
+  await memberPage.waitForURL(/\/boards\?workspacePublicId=/, {
+    timeout: 20_000,
+  });
+
+  return { memberUser, memberContext, memberPage };
+}
+
+test(
+  "an admin can revoke a role permission via the UI, and it persists",
+  { tag: "@self-hosted" },
+  async ({ page }) => {
+    const owner = createTestUser();
+    const auth = new AuthPage(page);
+    const onboarding = new SelfHostedOnboardingPage(page);
+    const dashboard = new DashboardPage(page);
+    const settings = new SettingsPage(page);
+
+    await auth.signUp(owner);
+    await onboarding.createFirstWorkspace("E2E Test Workspace");
+    await dashboard.expectSignedInAs(owner);
+
+    await settings.open();
+    await settings.goToTab("Permissions");
+
+    await expect(
+      settings.isRolePermissionChecked("Can create cards", "member"),
+    ).resolves.toBe(true);
+
+    await settings.setRolePermission("Can create cards", "member", false);
+
+    await page.reload();
+    await expect(
+      settings.isRolePermissionChecked("Can create cards", "member"),
+    ).resolves.toBe(false);
+  },
+);
+
+test(
+  "permission labels follow the selected language after navigation and reload",
+  { tag: "@self-hosted" },
+  async ({ page }) => {
+    const owner = createTestUser();
+    const auth = new AuthPage(page);
+    const onboarding = new SelfHostedOnboardingPage(page);
+    const settings = new SettingsPage(page);
+
+    await auth.signUp(owner);
+    await onboarding.createFirstWorkspace("E2E Test Workspace");
+
+    await settings.open();
+    await settings.goToTab("Permissions");
+    await expect(
+      page.getByRole("cell", { name: "Can view workspace" }),
+    ).toBeVisible();
+
+    await settings.goToTab("Account");
+    await page.locator("#language-select").selectOption("ru");
+    await expect(page.locator("#language-select")).toHaveValue("ru");
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("locale")))
+      .toBe("ru");
+
+    await settings.goToTab("Разрешения");
+    await expect(
+      page.getByRole("columnheader", { name: "Админ" }),
+    ).toBeVisible();
+    await page.reload();
+
+    await expect(
+      page.getByRole("cell", {
+        name: "Может просматривать рабочее пространство",
+      }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("cell", { name: "Рабочее пространство", exact: true }),
+    ).toBeVisible();
+    await expect(
+      page.getByRole("columnheader", { name: "Админ" }),
+    ).toBeVisible();
+  },
+);
+
+test(
+  "revoking a permission from the member role blocks that action for members",
+  { tag: "@self-hosted" },
+  async ({ page, browser }) => {
+    const owner = createTestUser();
+    const auth = new AuthPage(page);
+    const onboarding = new SelfHostedOnboardingPage(page);
+    const dashboard = new DashboardPage(page);
+    const board = new BoardPage(page);
+    const settings = new SettingsPage(page);
+
+    await auth.signUp(owner);
+    await onboarding.createFirstWorkspace("E2E Test Workspace");
+    await dashboard.expectSignedInAs(owner);
+
+    await board.createBoard("E2E Test Board");
+    await board.createList("To do");
+    const boardPublicId = page.url().split("/boards/")[1];
+    if (!boardPublicId) throw new Error("Could not resolve board from URL");
+
+    const listResponse = await page.request.get(
+      `/api/trpc/board.byId?batch=1&input=${encodeURIComponent(
+        JSON.stringify({
+          "0": { json: { boardPublicId } },
+        }),
+      )}`,
+    );
+    const listBody = (await listResponse.json()) as [
+      { result: { data: { json: { lists: { publicId: string }[] } } } },
+    ];
+    const targetListPublicId = listBody[0].result.data.json.lists[0]?.publicId;
+    if (!targetListPublicId) throw new Error("Could not resolve list publicId");
+
+    await settings.open();
+    await settings.goToTab("Permissions");
+    await settings.setRolePermission("Can create cards", "member", false);
+
+    const { memberUser, memberPage, memberContext } = await inviteSecondMember(
+      page,
+      browser,
+    );
+
+    const workspacePublicId = await page.evaluate(() =>
+      localStorage.getItem("workspacePublicId"),
+    );
+    if (!workspacePublicId)
+      throw new Error("workspacePublicId not found in localStorage");
+
+    const workspaceResponse = await page.request.get(
+      `/api/trpc/workspace.byId?batch=1&input=${encodeURIComponent(
+        JSON.stringify({ "0": { json: { workspacePublicId } } }),
+      )}`,
+    );
+    const workspaceBody = (await workspaceResponse.json()) as [
+      {
+        result: {
+          data: { json: { members: { publicId: string; email?: string }[] } };
+        };
+      },
+    ];
+    const invitedMember = workspaceBody[0].result.data.json.members.find(
+      (member) => member.email === memberUser.email,
+    );
+    if (!invitedMember)
+      throw new Error("Could not resolve invited member's publicId");
+
+    const boardMemberAddResponse = await page.request.post(
+      "/api/trpc/boardMember.add?batch=1",
+      {
+        data: {
+          "0": {
+            json: {
+              boardPublicId,
+              workspaceMemberPublicId: invitedMember.publicId,
+            },
+          },
+        },
+      },
+    );
+    expect(boardMemberAddResponse.ok()).toBe(true);
+
+    const cardInput = {
+      title: "Blocked card",
+      description: "",
+      listPublicId: targetListPublicId,
+      labelPublicIds: [],
+      memberPublicIds: [],
+      position: "start" as const,
+    };
+
+    const blockedResponse = await memberPage.request.post(
+      "/api/trpc/card.create?batch=1",
+      { data: { "0": { json: cardInput } } },
+    );
+    expect(blockedResponse.status()).toBe(403);
+
+    await settings.open();
+    await settings.goToTab("Permissions");
+    await settings.setRolePermission("Can create cards", "member", true);
+
+    const allowedResponse = await memberPage.request.post(
+      "/api/trpc/card.create?batch=1",
+      { data: { "0": { json: cardInput } } },
+    );
+    expect(allowedResponse.ok()).toBe(true);
+
+    await memberContext.close();
+  },
+);

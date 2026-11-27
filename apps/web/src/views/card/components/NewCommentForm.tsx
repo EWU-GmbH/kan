@@ -18,9 +18,11 @@ interface FormValues {
 const NewCommentForm = ({
   cardPublicId,
   workspaceMembers,
+  onCommentCreated,
 }: {
   cardPublicId: string;
   workspaceMembers: WorkspaceMember[];
+  onCommentCreated?: (commentPublicId: string) => void;
 }) => {
   const utils = api.useUtils();
   const { showPopup } = usePopup();
@@ -32,6 +34,9 @@ const NewCommentForm = ({
   });
 
   const addCommentMutation = api.card.addComment.useMutation({
+    onSuccess: (comment) => {
+      onCommentCreated?.(comment.publicId);
+    },
     onError: (_error, _newList) => {
       showPopup({
         header: t`Unable to add comment`,
@@ -89,6 +94,7 @@ const NewCommentForm = ({
         <Tooltip content={submitTooltip} placement="top">
           <button
             type="submit"
+            aria-label={t`Submit comment`}
             disabled={addCommentMutation.isPending}
             className="flex h-8 w-8 items-center justify-center rounded-full border border-light-600 bg-light-300 hover:bg-light-400 disabled:opacity-50 dark:border-dark-400 dark:bg-dark-200 dark:hover:bg-dark-400"
           >

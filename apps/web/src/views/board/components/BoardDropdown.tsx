@@ -5,11 +5,14 @@ import {
   HiEllipsisHorizontal,
   HiLink,
   HiOutlineDocumentDuplicate,
-  HiOutlineTrash,
+  HiOutlineLink,
   HiOutlineStar,
+  HiOutlineTrash,
+  HiOutlineUserGroup,
   HiStar,
 } from "react-icons/hi2";
 import { IoArchiveOutline } from "react-icons/io5";
+
 import Dropdown from "~/components/Dropdown";
 import { usePermissions } from "~/hooks/usePermissions";
 import { useModal } from "~/providers/modal";
@@ -23,6 +26,9 @@ export default function BoardDropdown({
   boardPublicId,
   isFavorite,
   boardName,
+  workspaceSlug,
+  boardSlug,
+  visibility,
 }: {
   isTemplate: boolean;
   isLoading: boolean;
@@ -30,6 +36,9 @@ export default function BoardDropdown({
   isArchived?: boolean;
   isFavorite?: boolean;
   boardName?: string;
+  workspaceSlug?: string;
+  boardSlug?: string;
+  visibility?: string;
 }) {
   const router = useRouter();
   const { openModal } = useModal();
@@ -44,7 +53,9 @@ export default function BoardDropdown({
       void utils.board.byId.invalidate();
       if (variables.isArchived !== undefined) {
         showPopup({
-          header: variables.isArchived ? t`Board archived` : t`Board unarchived`,
+          header: variables.isArchived
+            ? t`Board archived`
+            : t`Board unarchived`,
           message: variables.isArchived
             ? t`The board has been archived.`
             : t`The board has been unarchived.`,
@@ -88,53 +99,107 @@ export default function BoardDropdown({
 
   const isArchiveActionPending = updateBoard.isPending;
 
+  const copyLink = async (path: string, message: string) => {
+    const url = `${window.location.origin}${path}`;
+    try {
+      await navigator.clipboard.writeText(url);
+      showPopup({ header: t`Link copied`, icon: "success", message });
+    } catch (error) {
+      console.error(error);
+      showPopup({
+        header: t`Unable to copy link`,
+        message: t`Please try again.`,
+        icon: "error",
+      });
+    }
+  };
+
+  const handleCopyBoardLink = () =>
+    copyLink(
+      isTemplate ? `/templates/${boardPublicId}` : `/boards/${boardPublicId}`,
+      isTemplate
+        ? t`Template URL copied to clipboard`
+        : t`Board URL copied to clipboard`,
+    );
+
+  const handleCopyPublicLink = () =>
+    copyLink(
+      `/${workspaceSlug}/${boardSlug}`,
+      t`Public board URL copied to clipboard`,
+    );
+
   const items = [
+    {
+      label: t`Copy board link`,
+      action: handleCopyBoardLink,
+      icon: <HiOutlineLink className="h-[16px] w-[16px] text-dark-900" />,
+    },
+    ...(!isTemplate && visibility === "public" && workspaceSlug && boardSlug
+      ? [
+          {
+            label: t`Copy public link`,
+            action: handleCopyPublicLink,
+            icon: (
+              <HiOutlineLink className="h-[16px] w-[16px] text-dark-900" />
+            ),
+          },
+        ]
+      : []),
+    ...(!isTemplate
+      ? [
+          {
+            label: t`Board members`,
+            action: () => router.push(`/boards/${boardPublicId}/members`),
+            icon: (
+              <HiOutlineUserGroup className="h-[16px] w-[16px] text-dark-900" />
+            ),
+          },
+        ]
+      : []),
     ...(!isTemplate && canCreateBoard
       ? [
-        {
-          label: t`Make template`,
-          action: () => openModal("CREATE_TEMPLATE"),
-          icon: (
-            <HiOutlineDocumentDuplicate className="h-[16px] w-[16px] text-dark-900" />
-          ),
-        },
-      ]
+          {
+            label: t`Make template`,
+            action: () => openModal("CREATE_TEMPLATE"),
+            icon: (
+              <HiOutlineDocumentDuplicate className="h-[16px] w-[16px] text-dark-900" />
+            ),
+          },
+        ]
       : []),
     ...(!isTemplate && canEditBoard
       ? [
-        {
-          label: t`Edit board URL`,
-          action: () => openModal("UPDATE_BOARD_SLUG"),
-          icon: <HiLink className="h-[16px] w-[16px] text-dark-900" />,
-        },
-      ]
+          {
+            label: t`Edit board URL`,
+            action: () => openModal("UPDATE_BOARD_SLUG"),
+            icon: <HiLink className="h-[16px] w-[16px] text-dark-900" />,
+          },
+        ]
       : []),
     ...(!isTemplate && canArchiveBoard
       ? [
-        {
-          label: isArchived ? t`Unarchive board` : t`Archive board`,
-          action: handleArchiveOrUnarchive,
-          icon: (
-            <IoArchiveOutline className="h-[16px] w-[16px] text-dark-900" />
-          ),
-        },
-      ]
+          {
+            label: isArchived ? t`Unarchive board` : t`Archive board`,
+            action: handleArchiveOrUnarchive,
+            icon: (
+              <IoArchiveOutline className="h-[16px] w-[16px] text-dark-900" />
+            ),
+          },
+        ]
       : []),
     ...(!isTemplate && canEditBoard
       ? [
-        {
-          label: t`Move to workspace`,
-          action: () => openModal("MOVE_BOARD"),
-          icon: (
-            <HiArrowRightOnRectangle className="h-[16px] w-[16px] text-dark-900" />
-          ),
-        },
-      ]
+          {
+            label: t`Move to workspace`,
+            action: () => openModal("MOVE_BOARD"),
+            icon: (
+              <HiArrowRightOnRectangle className="h-[16px] w-[16px] text-dark-900" />
+            ),
+          },
+        ]
       : []),
     {
-      label: isFavorite
-        ? t`Remove from favorites`
-        : t`Add to favorites`,
+      label: isFavorite ? t`Remove from favorites` : t`Add to favorites`,
       action: handleToggleFavorite,
       icon: isFavorite ? (
         <HiStar className="h-[16px] w-[16px] text-dark-900" />
@@ -144,14 +209,14 @@ export default function BoardDropdown({
     },
     ...(canDeleteBoard
       ? [
-        {
-          label: isTemplate ? t`Delete template` : t`Delete board`,
-          action: () => openModal("DELETE_BOARD"),
-          icon: (
-            <HiOutlineTrash className="h-[16px] w-[16px] text-dark-900" />
-          ),
-        },
-      ]
+          {
+            label: isTemplate ? t`Delete template` : t`Delete board`,
+            action: () => openModal("DELETE_BOARD"),
+            icon: (
+              <HiOutlineTrash className="h-[16px] w-[16px] text-dark-900" />
+            ),
+          },
+        ]
       : []),
   ];
 
@@ -163,6 +228,8 @@ export default function BoardDropdown({
     <Dropdown
       disabled={isLoading || isArchiveActionPending}
       items={items}
+      ariaLabel={t`Board options`}
+      menuGap="md"
     >
       <HiEllipsisHorizontal className="h-5 w-5 text-dark-900" />
     </Dropdown>

@@ -2,9 +2,10 @@ import Link from "next/link";
 import { useRouter } from "next/router";
 import { Button } from "@headlessui/react";
 import { t } from "@lingui/core/macro";
+import { useLingui } from "@lingui/react";
 import { env } from "next-runtime-env";
 import { useTheme } from "next-themes";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { HiBolt } from "react-icons/hi2";
 import {
   TbLayoutSidebarLeftCollapse,
@@ -83,6 +84,8 @@ export default function SideNavigation({
 
   const { resolvedTheme } = useTheme();
 
+  const { i18n } = useLingui();
+
   const isCloudEnv = env("NEXT_PUBLIC_KAN_ENV") === "cloud";
 
   const isDarkMode = resolvedTheme === "dark";
@@ -92,56 +95,60 @@ export default function SideNavigation({
     href: string;
     icon: object;
     keyboardShortcut: KeyboardShortcut;
-  }[] = [
-    {
-      name: t`Boards`,
-      href: "/boards",
-      icon: isDarkMode ? boardsIconDark : boardsIconLight,
-      keyboardShortcut: {
-        type: "SEQUENCE",
-        strokes: [{ key: "G" }, { key: "B" }],
-        action: () => router.push("/boards"),
-        group: "NAVIGATION",
-        description: t`Go to boards`,
+  }[] = useMemo(
+    () => [
+      {
+        name: t`Boards`,
+        href: "/boards",
+        icon: isDarkMode ? boardsIconDark : boardsIconLight,
+        keyboardShortcut: {
+          type: "SEQUENCE",
+          strokes: [{ key: "G" }, { key: "B" }],
+          action: () => router.push("/boards"),
+          group: "NAVIGATION",
+          description: t`Go to boards`,
+        },
       },
-    },
-    {
-      name: t`Templates`,
-      href: "/templates",
-      icon: isDarkMode ? templatesIconDark : templatesIconLight,
-      keyboardShortcut: {
-        type: "SEQUENCE",
-        strokes: [{ key: "G" }, { key: "T" }],
-        action: () => router.push("/templates"),
-        group: "NAVIGATION",
-        description: t`Go to templates`,
+      {
+        name: t`Templates`,
+        href: "/templates",
+        icon: isDarkMode ? templatesIconDark : templatesIconLight,
+        keyboardShortcut: {
+          type: "SEQUENCE",
+          strokes: [{ key: "G" }, { key: "T" }],
+          action: () => router.push("/templates"),
+          group: "NAVIGATION",
+          description: t`Go to templates`,
+        },
       },
-    },
-    {
-      name: t`Members`,
-      href: "/members",
-      icon: isDarkMode ? membersIconDark : membersIconLight,
-      keyboardShortcut: {
-        type: "SEQUENCE",
-        strokes: [{ key: "G" }, { key: "M" }],
-        action: () => router.push("/members"),
-        group: "NAVIGATION",
-        description: t`Go to members`,
+      {
+        name: t`Members`,
+        href: "/members",
+        icon: isDarkMode ? membersIconDark : membersIconLight,
+        keyboardShortcut: {
+          type: "SEQUENCE",
+          strokes: [{ key: "G" }, { key: "M" }],
+          action: () => router.push("/members"),
+          group: "NAVIGATION",
+          description: t`Go to members`,
+        },
       },
-    },
-    {
-      name: t`Settings`,
-      href: "/settings",
-      icon: isDarkMode ? settingsIconDark : settingsIconLight,
-      keyboardShortcut: {
-        type: "SEQUENCE",
-        strokes: [{ key: "G" }, { key: "S" }],
-        action: () => router.push("/settings"),
-        group: "NAVIGATION",
-        description: t`Go to settings`,
+      {
+        name: t`Settings`,
+        href: "/settings",
+        icon: isDarkMode ? settingsIconDark : settingsIconLight,
+        keyboardShortcut: {
+          type: "SEQUENCE",
+          strokes: [{ key: "G" }, { key: "S" }],
+          action: () => router.push("/settings"),
+          group: "NAVIGATION",
+          description: t`Go to settings`,
+        },
       },
-    },
-  ];
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [isDarkMode, i18n.locale],
+  );
 
   const toggleCollapse = () => {
     setIsCollapsed(!isCollapsed);
@@ -221,7 +228,7 @@ export default function SideNavigation({
                   <ButtonComponent
                     iconLeft={<HiBolt />}
                     variant="secondary"
-                    href={`/upgrade/select-plan?plan=pro&workspacePublicId=${workspace.publicId}&returnUrl=${encodeURIComponent("/settings/billing")}`}
+                    href={`/upgrade/select-plan?plan=team&workspacePublicId=${workspace.publicId}&returnUrl=${encodeURIComponent("/settings/billing")}`}
                     aria-label={t`Start free trial`}
                     title={t`Start free trial`}
                     iconOnly
@@ -231,7 +238,7 @@ export default function SideNavigation({
                     iconLeft={<HiBolt />}
                     fullWidth
                     variant="secondary"
-                    href={`/upgrade/select-plan?plan=pro&workspacePublicId=${workspace.publicId}&returnUrl=${encodeURIComponent("/settings/billing")}`}
+                    href={`/upgrade/select-plan?plan=team&workspacePublicId=${workspace.publicId}&returnUrl=${encodeURIComponent("/settings/billing")}`}
                   >
                     {t`Start free trial`}
                   </ButtonComponent>

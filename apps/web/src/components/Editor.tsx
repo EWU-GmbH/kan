@@ -180,13 +180,13 @@ const RenderSuggestions = () => {
 
       if (!props.clientRect) return;
 
-      popup[0]?.setProps({
+      popup?.[0]?.setProps({
         getReferenceClientRect: props.clientRect,
       });
     },
     onKeyDown(props: SuggestionKeyDownProps): boolean {
       if (props.event.key === "Escape") {
-        popup[0]?.hide();
+        popup?.[0]?.hide();
         return true;
       }
 
@@ -199,7 +199,7 @@ const RenderSuggestions = () => {
       );
     },
     onExit() {
-      popup[0]?.destroy();
+      popup?.[0]?.destroy();
       reactRenderer.destroy();
     },
   };
@@ -308,11 +308,11 @@ const renderMentionSuggestions = () => {
     onUpdate(props: any) {
       reactRenderer.updateProps(props);
       if (!props.clientRect) return;
-      popup[0]?.setProps({ getReferenceClientRect: props.clientRect });
+      popup?.[0]?.setProps({ getReferenceClientRect: props.clientRect });
     },
     onKeyDown(props: SuggestionKeyDownProps) {
       if (props.event.key === "Escape") {
-        popup[0]?.hide();
+        popup?.[0]?.hide();
         return true;
       }
       return (
@@ -324,7 +324,7 @@ const renderMentionSuggestions = () => {
       );
     },
     onExit() {
-      popup[0]?.destroy();
+      popup?.[0]?.destroy();
       reactRenderer.destroy();
     },
   };
@@ -392,19 +392,19 @@ const getCommandItems = (disableHeadings: boolean): SlashCommandItem[] => {
     ? []
     : [
         {
-          title: "Heading 1",
+          title: t`Heading 1`,
           icon: <HiH1 />,
           command: ({ editor }) =>
             editor.chain().focus().setHeading({ level: 1 }).run(),
         },
         {
-          title: "Heading 2",
+          title: t`Heading 2`,
           icon: <HiH2 />,
           command: ({ editor }) =>
             editor.chain().focus().setHeading({ level: 2 }).run(),
         },
         {
-          title: "Heading 3",
+          title: t`Heading 3`,
           icon: <HiH3 />,
           command: ({ editor }) =>
             editor.chain().focus().setHeading({ level: 3 }).run(),
@@ -414,22 +414,22 @@ const getCommandItems = (disableHeadings: boolean): SlashCommandItem[] => {
   return [
     ...headingCommands,
     {
-      title: "Bullet List",
+      title: t`Bullet List`,
       icon: <HiOutlineListBullet />,
       command: ({ editor }) => editor.chain().focus().toggleBulletList().run(),
     },
     {
-      title: "Ordered List",
+      title: t`Ordered List`,
       icon: <HiOutlineNumberedList />,
       command: ({ editor }) => editor.chain().focus().toggleOrderedList().run(),
     },
     {
-      title: "Blockquote",
+      title: t`Blockquote`,
       icon: <HiOutlineChatBubbleLeftEllipsis />,
       command: ({ editor }) => editor.chain().focus().toggleBlockquote().run(),
     },
     {
-      title: "Code Block",
+      title: t`Code Block`,
       icon: <HiOutlineCodeBracketSquare />,
       command: ({ editor }) => editor.chain().focus().toggleCodeBlock().run(),
     },
