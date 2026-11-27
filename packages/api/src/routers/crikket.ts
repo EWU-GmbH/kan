@@ -1,6 +1,8 @@
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 
+import type { dbClient } from "@kan/db/client";
+import * as cardRepo from "@kan/db/repository/card.repo";
 import { createLogger } from "@kan/logger";
 
 import { createTRPCRouter, protectedProcedure } from "../trpc";
@@ -9,6 +11,7 @@ import {
   isCrikketIntegrationEnabled,
   sendCrikketFeatureRequestReporterFollowUp,
 } from "../utils/crikket-client";
+import { assertBoardAccess, assertPermission } from "../utils/permissions";
 
 const log = createLogger("crikket");
 
@@ -19,6 +22,38 @@ const followUpMessageSchema = z
   .trim()
   .min(1, "Nachricht darf nicht leer sein")
   .max(4000);
+
+async function assertCrikketCardAccess(
+  db: dbClient,
+  userId: string,
+  cardPublicId: string,
+  requiredPermission: "card:view" | "card:edit",
+) {
+  const card = await cardRepo.getWorkspaceAndCardIdByCardPublicId(
+    db,
+    cardPublicId,
+  );
+
+  if (!card) {
+    throw new TRPCError({
+      message: `Card with public ID ${cardPublicId} not found`,
+      code: "NOT_FOUND",
+    });
+  }
+
+  await assertPermission(db, userId, card.workspaceId, "card:view");
+  await assertBoardAccess(db, userId, {
+    id: card.boardId,
+    workspaceId: card.workspaceId,
+    type: card.boardType,
+  });
+
+  if (requiredPermission === "card:edit") {
+    await assertPermission(db, userId, card.workspaceId, "card:edit");
+  }
+
+  return card;
+}
 
 export const crikketRouter = createTRPCRouter({
   getFeatureRequestByCard: protectedProcedure
@@ -44,12 +79,21 @@ export const crikketRouter = createTRPCRouter({
       ]),
     )
     .query(async ({ ctx, input }) => {
-      if (!ctx.user) {
+      const userId = ctx.user?.id;
+
+      if (!userId) {
         throw new TRPCError({
           message: "User not authenticated",
           code: "UNAUTHORIZED",
         });
       }
+
+      await assertCrikketCardAccess(
+        ctx.db,
+        userId,
+        input.cardPublicId,
+        "card:view",
+      );
 
       if (!isCrikketIntegrationEnabled()) {
         return { linked: false as const };
@@ -101,12 +145,21 @@ export const crikketRouter = createTRPCRouter({
     )
     .output(z.object({ success: z.literal(true) }))
     .mutation(async ({ ctx, input }) => {
-      if (!ctx.user) {
+      const userId = ctx.user?.id;
+
+      if (!userId) {
         throw new TRPCError({
           message: "User not authenticated",
           code: "UNAUTHORIZED",
         });
       }
+
+      await assertCrikketCardAccess(
+        ctx.db,
+        userId,
+        input.cardPublicId,
+        "card:edit",
+      );
 
       if (!isCrikketIntegrationEnabled()) {
         throw new TRPCError({

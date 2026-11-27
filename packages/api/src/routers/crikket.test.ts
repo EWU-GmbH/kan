@@ -1,11 +1,43 @@
+import { TRPCError } from "@trpc/server";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import * as cardRepo from "@kan/db/repository/card.repo";
+
+import type * as PermissionsModule from "../utils/permissions";
 import { appRouter } from "../root";
+import { assertBoardAccess, assertPermission } from "../utils/permissions";
 
 vi.mock("../utils/encryption", () => ({
   encryptToken: vi.fn((token: string) => token),
   decryptToken: vi.fn((token: string) => token),
 }));
+
+vi.mock("@kan/db/repository/card.repo", async () => {
+  const actual = await vi.importActual<typeof cardRepo>(
+    "@kan/db/repository/card.repo",
+  );
+  return {
+    ...actual,
+    getWorkspaceAndCardIdByCardPublicId: vi.fn(),
+  };
+});
+
+vi.mock("../utils/permissions", async () => {
+  const actual = await vi.importActual<typeof PermissionsModule>(
+    "../utils/permissions",
+  );
+  return {
+    ...actual,
+    assertPermission: vi.fn(),
+    assertBoardAccess: vi.fn(),
+  };
+});
+
+const mockGetCardByPublicId = vi.mocked(
+  cardRepo.getWorkspaceAndCardIdByCardPublicId,
+);
+const mockAssertPermission = vi.mocked(assertPermission);
+const mockAssertBoardAccess = vi.mocked(assertBoardAccess);
 
 const mockUser = {
   id: "user-123",
@@ -15,15 +47,45 @@ const mockUser = {
 
 const validCardPublicId = "abc123def456";
 
+const mockCard = {
+  id: 42,
+  createdBy: "other-user",
+  workspaceId: 7,
+  workspaceVisibility: "private" as const,
+  listPublicId: "list12345678",
+  listName: "Backlog",
+  boardId: 11,
+  boardType: "regular" as const,
+  boardPublicId: "brd123456789",
+  boardName: "Support",
+};
+
+function createCaller(
+  user: typeof mockUser | null,
+  requestId: `${string}-${string}-${string}-${string}-${string}`,
+) {
+  return appRouter.createCaller({
+    user: user as never,
+    db: {} as never,
+    auth: {} as never,
+    headers: new Headers(),
+    transport: "trpc",
+    requestId,
+  });
+}
+
 describe("crikketRouter", () => {
   const originalBaseUrl = process.env.CRIKKET_BASE_URL;
   const originalApiKey = process.env.CRIKKET_API_KEY;
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    vi.restoreAllMocks();
+    vi.clearAllMocks();
     delete process.env.CRIKKET_BASE_URL;
     delete process.env.CRIKKET_API_KEY;
+    mockGetCardByPublicId.mockResolvedValue(mockCard);
+    mockAssertPermission.mockResolvedValue(undefined);
+    mockAssertBoardAccess.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -41,14 +103,7 @@ describe("crikketRouter", () => {
   });
 
   it("mounts crikket router on appRouter and rejects unauthenticated callers", async () => {
-    const caller = appRouter.createCaller({
-      user: null,
-      db: {} as never,
-      auth: {} as never,
-      headers: new Headers(),
-      transport: "trpc",
-      requestId: "00000000-0000-4000-8000-000000000001",
-    });
+    const caller = createCaller(null, "00000000-0000-4000-8000-000000000001");
 
     await expect(
       caller.crikket.getFeatureRequestByCard({
@@ -62,17 +117,177 @@ describe("crikketRouter", () => {
         message: "Rueckfrage",
       }),
     ).rejects.toMatchObject({ code: "UNAUTHORIZED" });
+
+    expect(mockGetCardByPublicId).not.toHaveBeenCalled();
   });
 
-  it("returns linked=false when Crikket integration is not configured", async () => {
-    const caller = appRouter.createCaller({
-      user: mockUser as never,
-      db: {} as never,
-      auth: {} as never,
-      headers: new Headers(),
-      transport: "trpc",
-      requestId: "00000000-0000-4000-8000-000000000002",
+  it("rejects with NOT_FOUND when card does not exist", async () => {
+    process.env.CRIKKET_BASE_URL = "https://report.example.test";
+    process.env.CRIKKET_API_KEY = "test-crikket-secret";
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    mockGetCardByPublicId.mockResolvedValue(null);
+
+    const caller = createCaller(
+      mockUser,
+      "00000000-0000-4000-8000-000000000002",
+    );
+
+    await expect(
+      caller.crikket.getFeatureRequestByCard({
+        cardPublicId: validCardPublicId,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    await expect(
+      caller.crikket.sendReporterFollowUp({
+        cardPublicId: validCardPublicId,
+        message: "Rueckfrage",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    expect(mockAssertPermission).not.toHaveBeenCalled();
+    expect(mockAssertBoardAccess).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects getFeatureRequestByCard with FORBIDDEN when caller lacks card:view access", async () => {
+    process.env.CRIKKET_BASE_URL = "https://report.example.test";
+    process.env.CRIKKET_API_KEY = "test-crikket-secret";
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    mockGetCardByPublicId.mockResolvedValue({
+      ...mockCard,
+      workspaceVisibility: "public",
     });
+    mockAssertPermission.mockRejectedValueOnce(
+      new TRPCError({
+        code: "FORBIDDEN",
+        message:
+          "You do not have permission to perform this action (card:view)",
+      }),
+    );
+
+    const caller = createCaller(
+      mockUser,
+      "00000000-0000-4000-8000-000000000003",
+    );
+
+    await expect(
+      caller.crikket.getFeatureRequestByCard({
+        cardPublicId: validCardPublicId,
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    expect(mockAssertPermission).toHaveBeenCalledWith(
+      expect.anything(),
+      mockUser.id,
+      mockCard.workspaceId,
+      "card:view",
+    );
+    expect(mockAssertBoardAccess).not.toHaveBeenCalled();
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("propagates NOT_FOUND from assertBoardAccess for uninvited workspace members", async () => {
+    process.env.CRIKKET_BASE_URL = "https://report.example.test";
+    process.env.CRIKKET_API_KEY = "test-crikket-secret";
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    mockAssertBoardAccess.mockRejectedValue(
+      new TRPCError({ code: "NOT_FOUND", message: "Board not found" }),
+    );
+
+    const caller = createCaller(
+      mockUser,
+      "00000000-0000-4000-8000-000000000008",
+    );
+
+    await expect(
+      caller.crikket.getFeatureRequestByCard({
+        cardPublicId: validCardPublicId,
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    await expect(
+      caller.crikket.sendReporterFollowUp({
+        cardPublicId: validCardPublicId,
+        message: "Rueckfrage",
+      }),
+    ).rejects.toMatchObject({ code: "NOT_FOUND" });
+
+    expect(mockAssertBoardAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      mockUser.id,
+      {
+        id: mockCard.boardId,
+        workspaceId: mockCard.workspaceId,
+        type: mockCard.boardType,
+      },
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("rejects sendReporterFollowUp with FORBIDDEN when caller lacks card:edit", async () => {
+    process.env.CRIKKET_BASE_URL = "https://report.example.test";
+    process.env.CRIKKET_API_KEY = "test-crikket-secret";
+    const fetchMock = vi.fn();
+    globalThis.fetch = fetchMock as unknown as typeof fetch;
+
+    mockAssertPermission.mockResolvedValueOnce(undefined).mockRejectedValueOnce(
+      new TRPCError({
+        code: "FORBIDDEN",
+        message:
+          "You do not have permission to perform this action (card:edit)",
+      }),
+    );
+
+    const caller = createCaller(
+      mockUser,
+      "00000000-0000-4000-8000-000000000004",
+    );
+
+    await expect(
+      caller.crikket.sendReporterFollowUp({
+        cardPublicId: validCardPublicId,
+        message: "Rueckfrage",
+      }),
+    ).rejects.toMatchObject({ code: "FORBIDDEN" });
+
+    expect(mockAssertPermission).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      mockUser.id,
+      mockCard.workspaceId,
+      "card:view",
+    );
+    expect(mockAssertBoardAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      mockUser.id,
+      {
+        id: mockCard.boardId,
+        workspaceId: mockCard.workspaceId,
+        type: mockCard.boardType,
+      },
+    );
+    expect(mockAssertPermission).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      mockUser.id,
+      mockCard.workspaceId,
+      "card:edit",
+    );
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("returns linked=false or PRECONDITION_FAILED when Crikket integration is not configured for authorized callers", async () => {
+    const caller = createCaller(
+      mockUser,
+      "00000000-0000-4000-8000-000000000005",
+    );
 
     await expect(
       caller.crikket.getFeatureRequestByCard({
@@ -88,7 +303,7 @@ describe("crikketRouter", () => {
     ).rejects.toMatchObject({ code: "PRECONDITION_FAILED" });
   });
 
-  it("fetches linked feature request with Bearer auth and handles 404", async () => {
+  it("fetches linked feature request with Bearer auth and handles 404 for authorized callers", async () => {
     process.env.CRIKKET_BASE_URL = "https://report.example.test///";
     process.env.CRIKKET_API_KEY = "test-crikket-secret";
 
@@ -111,14 +326,10 @@ describe("crikketRouter", () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const caller = appRouter.createCaller({
-      user: mockUser as never,
-      db: {} as never,
-      auth: {} as never,
-      headers: new Headers(),
-      transport: "trpc",
-      requestId: "00000000-0000-4000-8000-000000000003",
-    });
+    const caller = createCaller(
+      mockUser,
+      "00000000-0000-4000-8000-000000000006",
+    );
 
     const found = await caller.crikket.getFeatureRequestByCard({
       cardPublicId: validCardPublicId,
@@ -132,6 +343,21 @@ describe("crikketRouter", () => {
       reporterEmail: "melder@example.test",
       status: "open",
     });
+    expect(mockAssertPermission).toHaveBeenCalledWith(
+      expect.anything(),
+      mockUser.id,
+      mockCard.workspaceId,
+      "card:view",
+    );
+    expect(mockAssertBoardAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      mockUser.id,
+      {
+        id: mockCard.boardId,
+        workspaceId: mockCard.workspaceId,
+        type: mockCard.boardType,
+      },
+    );
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
       `https://report.example.test/api/kan/feature-requests/by-card/${validCardPublicId}`,
@@ -149,7 +375,7 @@ describe("crikketRouter", () => {
     expect(notFound).toEqual({ linked: false });
   });
 
-  it("posts reporter follow-up message to Crikket endpoint", async () => {
+  it("posts reporter follow-up message to Crikket endpoint when caller has board access and card:edit", async () => {
     process.env.CRIKKET_BASE_URL = "https://report.example.test/";
     process.env.CRIKKET_API_KEY = "test-crikket-secret";
 
@@ -162,14 +388,10 @@ describe("crikketRouter", () => {
 
     globalThis.fetch = fetchMock as unknown as typeof fetch;
 
-    const caller = appRouter.createCaller({
-      user: mockUser as never,
-      db: {} as never,
-      auth: {} as never,
-      headers: new Headers(),
-      transport: "trpc",
-      requestId: "00000000-0000-4000-8000-000000000004",
-    });
+    const caller = createCaller(
+      mockUser,
+      "00000000-0000-4000-8000-000000000007",
+    );
 
     const res = await caller.crikket.sendReporterFollowUp({
       cardPublicId: validCardPublicId,
@@ -177,6 +399,29 @@ describe("crikketRouter", () => {
     });
 
     expect(res).toEqual({ success: true });
+    expect(mockAssertPermission).toHaveBeenNthCalledWith(
+      1,
+      expect.anything(),
+      mockUser.id,
+      mockCard.workspaceId,
+      "card:view",
+    );
+    expect(mockAssertBoardAccess).toHaveBeenCalledWith(
+      expect.anything(),
+      mockUser.id,
+      {
+        id: mockCard.boardId,
+        workspaceId: mockCard.workspaceId,
+        type: mockCard.boardType,
+      },
+    );
+    expect(mockAssertPermission).toHaveBeenNthCalledWith(
+      2,
+      expect.anything(),
+      mockUser.id,
+      mockCard.workspaceId,
+      "card:edit",
+    );
     expect(fetchMock).toHaveBeenCalledWith(
       `https://report.example.test/api/kan/feature-requests/by-card/${validCardPublicId}/reporter-follow-up`,
       {
