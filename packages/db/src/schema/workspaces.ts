@@ -13,7 +13,9 @@ import {
   varchar,
 } from "drizzle-orm/pg-core";
 
-import { boards } from "./boards";
+import { workspacePlans } from "@kan/shared/utils";
+
+import { boardMembers, boards } from "./boards";
 import { workspaceMemberPermissions, workspaceRoles } from "./permissions";
 import { subscription } from "./subscriptions";
 import { users } from "./users";
@@ -35,8 +37,8 @@ export const slugTypes = ["reserved", "premium"] as const;
 export type SlugType = (typeof slugTypes)[number];
 export const slugTypeEnum = pgEnum("slug_type", slugTypes);
 
-export const workspacePlans = ["free", "team", "pro", "enterprise"] as const;
-export type WorkspacePlan = (typeof workspacePlans)[number];
+export type { WorkspacePlan } from "@kan/shared/utils";
+export { workspacePlans };
 export const workspacePlanEnum = pgEnum("workspace_plan", workspacePlans);
 
 export const workspaces = pgTable(
@@ -125,6 +127,7 @@ export const workspaceMembersRelations = relations(
       relationName: "workspaceMemberRole",
     }),
     permissions: many(workspaceMemberPermissions),
+    boardMemberships: many(boardMembers),
   }),
 );
 

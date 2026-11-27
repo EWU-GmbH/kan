@@ -3,10 +3,11 @@ import { env } from "next-runtime-env";
 import { z } from "zod";
 
 import type { WorkspacePlan } from "@kan/db/schema";
+import * as boardMemberRepo from "@kan/db/repository/boardMember.repo";
 import * as subscriptionRepo from "@kan/db/repository/subscription.repo";
 import * as workspaceRepo from "@kan/db/repository/workspace.repo";
 import * as workspaceSlugRepo from "@kan/db/repository/workspaceSlug.repo";
-import { generateAvatarUrl, generateUID } from "@kan/shared/utils";
+import { generateUID } from "@kan/shared/utils";
 
 import {
   workspaceCreateResponseSchema,
@@ -17,7 +18,8 @@ import {
   workspaceWithBoardsSchema,
 } from "../schemas";
 import { createTRPCRouter, protectedProcedure, publicProcedure } from "../trpc";
-import { assertPermission } from "../utils/permissions";
+import { createAvatarUrlResolver } from "../utils/avatarUrls";
+import { assertPermission, isWorkspaceAdmin } from "../utils/permissions";
 
 export const workspaceRouter = createTRPCRouter({
   all: protectedProcedure
@@ -45,6 +47,80 @@ export const workspaceRouter = createTRPCRouter({
       const result = await workspaceRepo.getAllByUserId(ctx.db, userId);
 
       return result;
+    }),
+  checkSlugAvailability: publicProcedure
+    .meta({
+      openapi: {
+        summary: "Check if a workspace slug is available",
+        method: "GET",
+        path: "/workspaces/check-slug-availability",
+        description: "Checks if a workspace slug is available",
+        tags: ["Workspaces"],
+        protect: true,
+      },
+    })
+    .input(
+      z.object({
+        workspaceSlug: z
+          .string()
+          .min(3)
+          .max(64)
+          .regex(/^(?![-]+$)[a-zA-Z0-9-]+$/),
+        workspacePublicId: z.string().min(12).optional(),
+      }),
+    )
+    .output(
+      z.object({
+        isAvailable: z.boolean(),
+        isReserved: z.boolean(),
+      }),
+    )
+    .query(async ({ ctx, input }) => {
+      const userId = ctx.user?.id;
+
+      if (!userId)
+        throw new TRPCError({
+          message: `User not authenticated`,
+          code: "UNAUTHORIZED",
+        });
+
+      const slug = input.workspaceSlug.toLowerCase();
+      // check slug is not reserved
+      const workspaceSlug = await workspaceSlugRepo.getWorkspaceSlug(
+        ctx.db,
+        slug,
+      );
+
+      const currentWorkspace = input.workspacePublicId
+        ? await workspaceRepo.getByPublicId(ctx.db, input.workspacePublicId)
+        : undefined;
+
+      // check slug is not taken already
+      const isWorkspaceSlugAvailable =
+        await workspaceRepo.isWorkspaceSlugAvailable(
+          ctx.db,
+          slug,
+          currentWorkspace?.id,
+        );
+
+      const isAvailable =
+        isWorkspaceSlugAvailable && workspaceSlug?.type !== "reserved";
+      const isReserved = workspaceSlug?.type === "reserved";
+
+      if (env("NEXT_PUBLIC_KAN_ENV") === "cloud") {
+        await workspaceSlugRepo.createWorkspaceSlugCheck(ctx.db, {
+          slug,
+          userId,
+          available: isAvailable,
+          reserved: isReserved,
+        });
+      }
+
+      return {
+        isAvailable:
+          isWorkspaceSlugAvailable && workspaceSlug?.type !== "reserved",
+        isReserved: workspaceSlug?.type === "reserved",
+      };
     }),
   byId: protectedProcedure
     .meta({
@@ -90,13 +166,14 @@ export const workspaceRouter = createTRPCRouter({
       const shouldShowEmails = isAdmin || result.showEmailsToMembers === true;
 
       // Generate presigned URLs for member avatars
+      const resolveAvatarUrl = createAvatarUrlResolver();
       const membersWithAvatarUrls = await Promise.all(
         result.members.map(async (member) => {
           if (!member.user?.image) {
             return member;
           }
 
-          const avatarUrl = await generateAvatarUrl(member.user.image);
+          const avatarUrl = await resolveAvatarUrl(member.user.image);
           return {
             ...member,
             user: {
@@ -205,12 +282,18 @@ export const workspaceRouter = createTRPCRouter({
       z.object({
         name: z.string().min(1).max(64),
         description: z.string().max(280).optional(),
+        // NewWorkspaceForm submits slug as "" when the user leaves the URL
+        // field empty (its own schema allows .or(z.literal(""))), so the
+        // server must accept the empty string too and fall back to the
+        // generated public id below — otherwise self-hosted workspace
+        // creation fails validation whenever the slug is left blank.
         slug: z
           .string()
           .min(3)
           .max(64)
           .regex(/^(?![-]+$)[a-zA-Z0-9-]+$/)
-          .optional(),
+          .optional()
+          .or(z.literal("")),
       }),
     )
     .output(workspaceCreateResponseSchema)
@@ -233,7 +316,9 @@ export const workspaceRouter = createTRPCRouter({
       }
 
       const workspacePublicId = generateUID();
-      const workspaceSlug = input.slug ?? workspacePublicId;
+      // `||` (not `??`): an empty-string slug must also fall back to the
+      // generated public id.
+      const workspaceSlug = input.slug || workspacePublicId;
 
       if (input.slug) {
         const reservedOrPremiumWorkspaceSlug =
@@ -371,11 +456,15 @@ export const workspaceRouter = createTRPCRouter({
           await workspaceSlugRepo.getWorkspaceSlug(ctx.db, input.slug);
 
         const isWorkspaceSlugAvailable =
-          await workspaceRepo.isWorkspaceSlugAvailable(ctx.db, input.slug);
+          await workspaceRepo.isWorkspaceSlugAvailable(
+            ctx.db,
+            input.slug,
+            workspace.id,
+          );
 
         if (
           env("NEXT_PUBLIC_KAN_ENV") === "cloud" &&
-          workspace.plan !== "pro" &&
+          workspace.plan === "free" &&
           input.slug !== workspace.publicId
         ) {
           throw new TRPCError({
@@ -467,71 +556,6 @@ export const workspaceRouter = createTRPCRouter({
 
       return { success: true };
     }),
-  checkSlugAvailability: publicProcedure
-    .meta({
-      openapi: {
-        summary: "Check if a workspace slug is available",
-        method: "GET",
-        path: "/workspaces/check-slug-availability",
-        description: "Checks if a workspace slug is available",
-        tags: ["Workspaces"],
-        protect: true,
-      },
-    })
-    .input(
-      z.object({
-        workspaceSlug: z
-          .string()
-          .min(3)
-          .max(64)
-          .regex(/^(?![-]+$)[a-zA-Z0-9-]+$/),
-      }),
-    )
-    .output(
-      z.object({
-        isAvailable: z.boolean(),
-        isReserved: z.boolean(),
-      }),
-    )
-    .query(async ({ ctx, input }) => {
-      const userId = ctx.user?.id;
-
-      if (!userId)
-        throw new TRPCError({
-          message: `User not authenticated`,
-          code: "UNAUTHORIZED",
-        });
-
-      const slug = input.workspaceSlug.toLowerCase();
-      // check slug is not reserved
-      const workspaceSlug = await workspaceSlugRepo.getWorkspaceSlug(
-        ctx.db,
-        slug,
-      );
-
-      // check slug is not taken already
-      const isWorkspaceSlugAvailable =
-        await workspaceRepo.isWorkspaceSlugAvailable(ctx.db, slug);
-
-      const isAvailable =
-        isWorkspaceSlugAvailable && workspaceSlug?.type !== "reserved";
-      const isReserved = workspaceSlug?.type === "reserved";
-
-      if (env("NEXT_PUBLIC_KAN_ENV") === "cloud") {
-        await workspaceSlugRepo.createWorkspaceSlugCheck(ctx.db, {
-          slug,
-          userId,
-          available: isAvailable,
-          reserved: isReserved,
-        });
-      }
-
-      return {
-        isAvailable:
-          isWorkspaceSlugAvailable && workspaceSlug?.type !== "reserved",
-        isReserved: workspaceSlug?.type === "reserved",
-      };
-    }),
   search: protectedProcedure
     .meta({
       openapi: {
@@ -599,11 +623,23 @@ export const workspaceRouter = createTRPCRouter({
         });
       await assertPermission(ctx.db, userId, workspace.id, "workspace:view");
 
+      const memberBoardIds = (await isWorkspaceAdmin(
+        ctx.db,
+        userId,
+        workspace.id,
+      ))
+        ? undefined
+        : await boardMemberRepo.getMemberBoardIds(ctx.db, {
+            workspaceId: workspace.id,
+            userId,
+          });
+
       const result = await workspaceRepo.searchBoardsAndCards(
         ctx.db,
         workspace.id,
         input.query,
         input.limit,
+        memberBoardIds,
       );
 
       return result;

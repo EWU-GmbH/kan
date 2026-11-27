@@ -10,7 +10,6 @@ import * as workspaceRepo from "@kan/db/repository/workspace.repo";
 import { colours } from "@kan/shared/constants";
 import {
   convertDueDateFiltersToRanges,
-  generateAvatarUrl,
   generateSlug,
   generateUID,
 } from "@kan/shared/utils";
@@ -23,7 +22,15 @@ import {
   boardCreateResponseSchema,
   boardUpdateResponseSchema,
 } from "../schemas";
-import { assertCanDelete, assertCanEdit, assertPermission } from "../utils/permissions";
+import { createAvatarUrlResolver } from "../utils/avatarUrls";
+import {
+  assertBoardAccess,
+  assertCanDelete,
+  assertCanEdit,
+  assertPermission,
+  filterBoardAssignable,
+  isWorkspaceAdmin,
+} from "../utils/permissions";
 
 export const boardRouter = createTRPCRouter({
   all: protectedProcedure
@@ -67,6 +74,8 @@ export const boardRouter = createTRPCRouter({
 
       await assertPermission(ctx.db, userId, workspace.id, "board:view");
 
+      const isAdmin = await isWorkspaceAdmin(ctx.db, userId, workspace.id);
+
       const result = boardRepo.getAllByWorkspaceId(
         ctx.db,
         workspace.id,
@@ -74,6 +83,7 @@ export const boardRouter = createTRPCRouter({
         {
           type: input.type,
           archived: input.archived ?? false,
+          isWorkspaceAdmin: isAdmin,
         }
       );
 
@@ -133,6 +143,7 @@ export const boardRouter = createTRPCRouter({
         });
 
       await assertPermission(ctx.db, userId, board.workspaceId, "board:view");
+      await assertBoardAccess(ctx.db, userId, board);
 
       // Convert semantic string filters to date ranges expected by the repo
       const dueDateFilters = input.dueDateFilters
@@ -159,17 +170,22 @@ export const boardRouter = createTRPCRouter({
         });
       }
 
+      const resolveAvatarUrl = createAvatarUrlResolver();
+
       // Generate presigned URLs for workspace member avatars
       const workspaceWithAvatarUrls = result.workspace
         ? {
           ...result.workspace,
+          // Only offer people who belong on this board as assignees/filters.
           members: await Promise.all(
-            result.workspace.members.map(async (member) => {
+            (
+              await filterBoardAssignable(ctx.db, board, result.workspace.members)
+            ).map(async (member) => {
               if (!member.user?.image) {
                 return member;
               }
 
-              const avatarUrl = await generateAvatarUrl(member.user.image);
+              const avatarUrl = await resolveAvatarUrl(member.user.image);
               return {
                 ...member,
                 user: {
@@ -192,7 +208,7 @@ export const boardRouter = createTRPCRouter({
               members: await Promise.all(
                 card.members.map(async (member) => {
                   if (!member.user?.image) return member;
-                  const avatarUrl = await generateAvatarUrl(member.user.image);
+                  const avatarUrl = await resolveAvatarUrl(member.user.image);
                   return {
                     ...member,
                     user: { ...member.user, image: avatarUrl },
@@ -231,7 +247,7 @@ export const boardRouter = createTRPCRouter({
           .regex(/^(?![-]+$)[a-zA-Z0-9-]+$/),
         boardSlug: z
           .string()
-          .min(3)
+          .min(1)
           .max(60)
           .regex(/^(?![-]+$)[a-zA-Z0-9-]+$/),
         members: z.array(z.string().min(12)).optional(),
@@ -330,16 +346,21 @@ export const boardRouter = createTRPCRouter({
       // If sourceBoardPublicId is provided, clone the source board
       if (input.sourceBoardPublicId) {
         // First get the source board info (ID and type)
-        const sourceBoardInfo = await boardRepo.getIdByPublicId(
-          ctx.db,
-          input.sourceBoardPublicId,
-        );
+        const sourceBoardInfo =
+          await boardRepo.getWorkspaceAndBoardIdByBoardPublicId(
+            ctx.db,
+            input.sourceBoardPublicId,
+          );
 
-        if (!sourceBoardInfo)
+        if (!sourceBoardInfo || sourceBoardInfo.deletedAt)
           throw new TRPCError({
             message: `Source board with public ID ${input.sourceBoardPublicId} not found`,
             code: "NOT_FOUND",
           });
+
+        // Copying a board exposes all of its content, so the caller must be
+        // able to see the source board.
+        await assertBoardAccess(ctx.db, userId, sourceBoardInfo);
 
         // Get the full board data with the correct type
         const sourceBoard = await boardRepo.getByPublicId(
@@ -465,7 +486,7 @@ export const boardRouter = createTRPCRouter({
         name: z.string().min(1).optional(),
         slug: z
           .string()
-          .min(3)
+          .min(1)
           .max(60)
           .regex(/^(?![-]+$)[a-zA-Z0-9-]+$/)
           .optional(),
@@ -502,6 +523,7 @@ export const boardRouter = createTRPCRouter({
         "board:edit",
         board.createdBy ?? null,
       );
+      await assertBoardAccess(ctx.db, userId, board);
 
       // Handle favorite toggle separately
       if (input.favorite !== undefined) {
@@ -595,6 +617,7 @@ export const boardRouter = createTRPCRouter({
         "board:delete",
         board.createdBy ?? null,
       );
+      await assertBoardAccess(ctx.db, userId, board);
 
       const listIds = board.lists.map((list) => list.id);
 
@@ -706,6 +729,7 @@ export const boardRouter = createTRPCRouter({
         "board:edit",
         board.createdBy ?? null,
       );
+      await assertBoardAccess(ctx.db, userId, board);
 
       // Get target workspace. workspaceRepo.getByPublicId does not yet
       // filter soft-deleted workspaces (legacy: same is true for several
@@ -754,6 +778,7 @@ export const boardRouter = createTRPCRouter({
         ctx.db,
         board.id,
         targetWorkspace.id,
+        userId,
         slug,
       );
 
@@ -774,7 +799,7 @@ export const boardRouter = createTRPCRouter({
       z.object({
         boardSlug: z
           .string()
-          .min(3)
+          .min(1)
           .max(60)
           .regex(/^(?![-]+$)[a-zA-Z0-9-]+$/),
         boardPublicId: z.string().min(12),
